@@ -152,7 +152,7 @@ export default function TransitCard() {
     const overallToken = scoreTokens[getScoreBand(overallScore)];
 
     return (
-        <div className="mx-4 rounded-xl bg-zinc-900/50 border border-zinc-800 p-4">
+        <div className="rounded-xl bg-zinc-900/50 border border-zinc-800 p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-3">
                 <div>

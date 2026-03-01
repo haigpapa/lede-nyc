@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Suspense } from "react";
 import BottomNav from "@/components/BottomNav";
 import { NeighborhoodProvider } from "@/context/NeighborhoodContext";
 import OnboardGate from "@/components/OnboardGate";
@@ -24,14 +25,16 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
         <NeighborhoodProvider>
-          <OnboardGate>
-            <div className="relative flex min-h-screen w-full flex-col max-w-[430px] mx-auto overflow-x-hidden border-x border-zinc-800">
-              <div className="flex-1 flex flex-col pb-20">
-                {children}
+          <Suspense>
+            <OnboardGate>
+              <div className="relative flex min-h-screen w-full flex-col max-w-[430px] mx-auto overflow-x-hidden border-x border-zinc-800">
+                <div className="flex-1 flex flex-col pb-20">
+                  {children}
+                </div>
+                <BottomNav />
               </div>
-              <BottomNav />
-            </div>
-          </OnboardGate>
+            </OnboardGate>
+          </Suspense>
         </NeighborhoodProvider>
       </body>
     </html>

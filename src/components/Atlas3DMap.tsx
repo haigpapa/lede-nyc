@@ -58,38 +58,14 @@ function filterPermits(permits: PermitMarker[], filter: Filter) {
     return permits.filter(p => p.jobType === filter);
 }
 
-// Stripped-down dark map: no POI icons, no business labels, no transit icons,
-// no administrative labels — only roads, water, parks, and street names.
-const DARK_MAP_STYLE = [
-    // Base geometry: near-black
-    { elementType: 'geometry',              stylers: [{ color: '#09090b' }] },
-    { elementType: 'labels.text.stroke',    stylers: [{ color: '#09090b' }] },
-    { elementType: 'labels.text.fill',      stylers: [{ color: '#52525b' }] },
-    // Roads
-    { featureType: 'road',                  elementType: 'geometry',         stylers: [{ color: '#18181b' }] },
-    { featureType: 'road',                  elementType: 'geometry.stroke',  stylers: [{ color: '#27272a' }] },
-    { featureType: 'road',                  elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
-    { featureType: 'road.highway',          elementType: 'geometry',         stylers: [{ color: '#1c1c1f' }] },
-    // Water: deep navy
-    { featureType: 'water',                 elementType: 'geometry',         stylers: [{ color: '#0c1a2e' }] },
-    { featureType: 'water',                 elementType: 'labels.text.fill', stylers: [{ visibility: 'off' }] },
-    // Parks: very dark green
-    { featureType: 'poi.park',              elementType: 'geometry',         stylers: [{ color: '#0f2016' }] },
-    { featureType: 'poi.park',              elementType: 'labels',           stylers: [{ visibility: 'off' }] },
-    // Hide ALL other POI (restaurants, shops, cafes, attractions, etc.)
-    { featureType: 'poi',                   elementType: 'labels',           stylers: [{ visibility: 'off' }] },
-    { featureType: 'poi',                   elementType: 'geometry',         stylers: [{ color: '#111113' }] },
-    // Hide transit icons and labels
-    { featureType: 'transit',               elementType: 'geometry',         stylers: [{ color: '#18181b' }] },
-    { featureType: 'transit',               elementType: 'labels',           stylers: [{ visibility: 'off' }] },
-    { featureType: 'transit.station',       elementType: 'labels',           stylers: [{ visibility: 'off' }] },
-    // Hide administrative (neighborhood, city, county labels) — keep only road names
-    { featureType: 'administrative',        elementType: 'labels',           stylers: [{ visibility: 'off' }] },
-    { featureType: 'administrative.land_parcel', elementType: 'labels',      stylers: [{ visibility: 'off' }] },
-    { featureType: 'administrative.neighborhood', elementType: 'labels',     stylers: [{ visibility: 'off' }] },
-    // Landscape
-    { featureType: 'landscape',             elementType: 'geometry',         stylers: [{ color: '#0d0d0f' }] },
-];
+// NOTE: We cannot use styles[] with WebGL/3D maps — styles require a Map ID.
+// We apply mapTypeId + backgroundColor to get the darkest possible base,
+// and suppress POI/transit entirely via clickableIcons + a post-init style
+// workaround. The map will use ROADMAP type which supports v=beta tilt.
+//
+// For a fully custom dark style on a 3D map you need a Maps Platform Map ID
+// with Cloud Styling configured. Set NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID in .env.local.
+// Without it we fall back to the standard roadmap (lighter) but still functional.
 
 interface Atlas3DMapProps { className?: string }
 
@@ -114,20 +90,11 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     // ── Fullscreen handling ───────────────────────────────────────────────────
+    // We expand within the app shell (fills from below the header to above the
+    // bottom nav) rather than using the native Fullscreen API, which doesn't
+    // respect the max-w-[430px] phone shell or the bottom nav.
     const toggleFullscreen = useCallback(() => {
-        const el = wrapperRef.current;
-        if (!el) return;
-        if (!document.fullscreenElement) {
-            el.requestFullscreen().catch(err => console.warn('[Atlas3DMap] fullscreen:', err));
-        } else {
-            document.exitFullscreen();
-        }
-    }, []);
-
-    useEffect(() => {
-        const handler = () => setIsFullscreen(!!document.fullscreenElement);
-        document.addEventListener('fullscreenchange', handler);
-        return () => document.removeEventListener('fullscreenchange', handler);
+        setIsFullscreen(f => !f);
     }, []);
 
     // ── Tilt / heading controls ───────────────────────────────────────────────
@@ -188,12 +155,17 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 if (match) center = { lat: match.lat, lng: match.lng };
             }
 
+            const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
+
             const map = new google.maps.Map(mapRef.current, {
                 center,
                 zoom: 13,
                 tilt: 60,
                 heading: 0,
-                styles: DARK_MAP_STYLE,
+                // mapId enables WebGL + cloud styling (dark theme if configured)
+                // Without a Map ID, 3D/tilt still works but uses default light theme
+                ...(mapId ? { mapId } : {}),
+                mapTypeId: 'roadmap',
                 disableDefaultUI: true,
                 zoomControl: false,         // we provide our own controls
                 gestureHandling: 'greedy',
@@ -350,11 +322,13 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 })}
             </div>
 
-            {/* Map wrapper — fullscreen target */}
+            {/* Map wrapper — expands to fill app shell when fullscreen */}
             <div
                 ref={wrapperRef}
-                className={`relative mx-4 rounded-xl overflow-hidden border border-zinc-800/80 ${
-                    isFullscreen ? 'h-screen rounded-none mx-0' : 'h-[460px]'
+                className={`relative overflow-hidden border border-zinc-800/80 transition-none ${
+                    isFullscreen
+                        ? 'fixed inset-0 bottom-[64px] z-40 rounded-none mx-0'   // covers header→bottom nav
+                        : 'mx-4 rounded-xl h-[460px]'
                 }`}
             >
                 {/* Google Maps canvas */}
@@ -425,10 +399,10 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     <button
                         onClick={toggleFullscreen}
                         className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all text-base select-none active:scale-95"
-                        title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
-                        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                        title={isFullscreen ? 'Collapse map' : 'Expand map'}
+                        aria-label={isFullscreen ? 'Collapse map' : 'Expand map'}
                     >
-                        {isFullscreen ? '⊠' : '⤢'}
+                        {isFullscreen ? '⊡' : '⤢'}
                     </button>
                 )}
 
