@@ -40,13 +40,9 @@ export default function LedeCard({
 
     return (
         <div
-            className="relative p-5 rounded-xl bg-zinc-900/50 backdrop-blur-md border border-zinc-800 overflow-hidden transition-transform motion-reduce:transition-none active:scale-95 motion-reduce:active:scale-100"
-            style={{ boxShadow: `0 0 20px -5px ${theme.shadow}` }}
+            className={`relative pl-4 pr-5 py-5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 border-l-2 ${theme.border} overflow-hidden transition-transform motion-reduce:transition-none active:scale-[0.99] motion-reduce:active:scale-100`}
         >
-            {/* Accent glow blob */}
-            <div className={`absolute -top-10 -right-10 w-32 h-32 ${theme.bg} blur-3xl rounded-full pointer-events-none`} />
-
-            <div className="flex flex-col gap-3 relative z-10">
+            <div className="flex flex-col gap-3">
                 {/* Category row — with sparkline if trend exists */}
                 <div className="flex items-center justify-between">
                     <span className={`text-xs font-bold tracking-[0.1em] ${theme.text} uppercase`}>

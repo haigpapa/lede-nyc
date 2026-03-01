@@ -7,26 +7,42 @@ interface AppHeaderProps {
     overrideLabel?: string;
 }
 
+function getEditionTime() {
+    return new Date().toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York',
+    });
+}
+
 export default function AppHeader({ overrideLabel }: AppHeaderProps) {
     const { profile } = useNeighborhood();
 
     const neighborhoodLabel = overrideLabel
-        ?? (profile ? `${profile.displayName}, ${profile.borough}` : '—');
+        ?? (profile ? `${profile.displayName}, ${profile.borough}` : 'New York City');
 
     return (
-        <header className="sticky top-0 z-50 flex items-center bg-[#09090b]/90 backdrop-blur-md px-4 py-3 justify-between border-b border-zinc-800">
-            <div className="flex flex-col">
+        <header className="sticky top-0 z-50 flex items-center bg-[#09090b]/95 backdrop-blur-md px-4 py-3 justify-between border-b border-zinc-800/70">
+            {/* Masthead */}
+            <div className="flex flex-col gap-0.5">
                 <h1 className="text-lg font-bold tracking-tight leading-none">
                     <span className="text-white">Lede</span>
                     <span className="text-emerald-400">.</span>
                     <span className="text-zinc-500">nyc</span>
                 </h1>
-                <span className="text-xs text-zinc-500 mt-0.5 font-mono">{neighborhoodLabel}</span>
+                <span className="text-[10px] font-mono text-zinc-500 tracking-wide uppercase">
+                    {neighborhoodLabel}
+                </span>
             </div>
-            <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium bg-emerald-400/10 px-2.5 py-1 rounded-full border border-emerald-400/20">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse motion-reduce:animate-none" />
-                    Live
+
+            {/* Edition stamp — calm, authoritative */}
+            <div className="flex flex-col items-end gap-0.5">
+                <span className="text-[10px] font-mono text-zinc-500 tracking-wider uppercase">
+                    NYC Edition
+                </span>
+                <span className="text-[10px] font-mono text-zinc-600">
+                    {getEditionTime()} ET
                 </span>
             </div>
         </header>

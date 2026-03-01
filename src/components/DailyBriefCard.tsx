@@ -93,11 +93,8 @@ export default function DailyBriefCard({ summary, timestamp }: DailyBriefCardPro
     const hasAudio = audioState !== 'idle';
 
     return (
-        <div className="relative p-5 rounded-xl bg-zinc-900/50 backdrop-blur-md border border-zinc-800 overflow-hidden"
-            style={{ boxShadow: '0 0 30px -8px rgba(52,211,153,0.15)' }}
+        <div className="relative pl-4 pr-5 py-5 rounded-xl bg-zinc-900/60 border border-zinc-800/80 border-l-2 border-l-emerald-500 overflow-hidden"
         >
-            {/* Background radial glow */}
-            <div className="absolute -top-8 -left-8 w-40 h-40 bg-emerald-500/5 blur-3xl rounded-full pointer-events-none" />
 
             {/* Live indicator when playing */}
             {isPlaying && (
@@ -110,16 +107,18 @@ export default function DailyBriefCard({ summary, timestamp }: DailyBriefCardPro
                 </div>
             )}
 
-            <div className="relative z-10 flex flex-col gap-3">
-                {/* Header row */}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <span className="text-base">📰</span>
-                        <span className="text-[10px] font-bold tracking-[0.12em] text-emerald-400 uppercase">
+            <div className="flex flex-col gap-3">
+                {/* Masthead row */}
+                <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-mono font-bold tracking-[0.18em] text-emerald-400 uppercase">
                             Lede Daily Brief
                         </span>
+                        <span className="text-[10px] font-mono text-zinc-600 tracking-wide">
+                            NYC Construction Intelligence
+                        </span>
                     </div>
-                    <span className="text-[10px] font-mono text-zinc-500">{date}</span>
+                    <span className="text-[10px] font-mono text-zinc-500 shrink-0">{date}</span>
                 </div>
 
                 {/* Summary */}

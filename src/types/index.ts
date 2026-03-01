@@ -8,15 +8,16 @@ export interface AccentTheme {
     dot: string;
     btn: string;
     shadow: string;
-    hex: string;  // raw hex for use in SVG / inline styles
+    hex: string;      // raw hex for use in SVG / inline styles
+    border: string;   // Tailwind border-l color for editorial left-rule accent
 }
 
 export const accentMap: Record<AccentColor, AccentTheme> = {
-    emerald: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', btn: 'bg-emerald-400 hover:bg-emerald-500', shadow: 'rgba(52,211,153,0.2)',  hex: '#34d399' },
-    amber:   { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400',   btn: 'bg-amber-400 hover:bg-amber-500',   shadow: 'rgba(251,191,36,0.2)',   hex: '#fbbf24' },
-    sky:     { bg: 'bg-sky-500/10',     text: 'text-sky-400',     dot: 'bg-sky-400',     btn: 'bg-sky-400 hover:bg-sky-500',       shadow: 'rgba(56,189,248,0.2)',   hex: '#38bdf8' },
-    violet:  { bg: 'bg-violet-500/10',  text: 'text-violet-400',  dot: 'bg-violet-400',  btn: 'bg-violet-400 hover:bg-violet-500', shadow: 'rgba(167,139,250,0.2)', hex: '#a78bfa' },
-    rose:    { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400',    btn: 'bg-rose-400 hover:bg-rose-500',     shadow: 'rgba(251,113,133,0.2)', hex: '#fb7185' },
+    emerald: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', btn: 'bg-emerald-400 hover:bg-emerald-500', shadow: 'rgba(52,211,153,0.12)',  hex: '#34d399', border: 'border-emerald-500' },
+    amber:   { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400',   btn: 'bg-amber-400 hover:bg-amber-500',   shadow: 'rgba(251,191,36,0.12)',   hex: '#fbbf24', border: 'border-amber-500'   },
+    sky:     { bg: 'bg-sky-500/10',     text: 'text-sky-400',     dot: 'bg-sky-400',     btn: 'bg-sky-400 hover:bg-sky-500',       shadow: 'rgba(56,189,248,0.12)',   hex: '#38bdf8', border: 'border-sky-500'     },
+    violet:  { bg: 'bg-violet-500/10',  text: 'text-violet-400',  dot: 'bg-violet-400',  btn: 'bg-violet-400 hover:bg-violet-500', shadow: 'rgba(167,139,250,0.12)', hex: '#a78bfa',  border: 'border-violet-500'  },
+    rose:    { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400',    btn: 'bg-rose-400 hover:bg-rose-500',     shadow: 'rgba(251,113,133,0.12)', hex: '#fb7185',  border: 'border-rose-500'    },
 };
 
 // ── Shared performance-score tokens (replaces scoreColor() in TransitCard) ────
