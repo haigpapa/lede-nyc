@@ -75,10 +75,10 @@ export async function runPermitAuditor(): Promise<{ rows: AnomalyRow[]; sql: str
         COALESCE(string_field_7, 'UNKNOWN') AS zip,
         COALESCE(string_field_6, 'UNKNOWN') AS job_type,
         COALESCE(string_field_9 || ' ' || string_field_11, 'Unknown Address') AS address,
-        PARSE_DATE('%m/%d/%Y', string_field_18) AS issued_date
+        SAFE.PARSE_DATE('%m/%d/%Y', string_field_18) AS issued_date
       FROM \`lede-nyc-data.civicdata.dob-permits\`
       WHERE string_field_7 IS NOT NULL
-        AND string_field_6 IN ('NB', 'A1', 'A2', 'DM')
+        AND string_field_6 IN ('NB', 'A1', 'A2', 'DM', 'SG', 'EW', 'PL', 'FP', 'EQ', 'BL')
     ),
     recent_7d AS (
       SELECT zip, job_type, COUNT(*) AS cnt_7d,
