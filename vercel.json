@@ -1,0 +1,12 @@
+{
+    "crons": [
+        {
+            "path": "/api/pipeline/run",
+            "schedule": "0 11 * * *"
+        },
+        {
+            "path": "/api/store-mta-snapshot",
+            "schedule": "0 5 * * *"
+        }
+    ]
+}
