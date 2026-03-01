@@ -1,12 +1,16 @@
 'use client';
 
 /**
- * Atlas3DMap — Google Maps WebGL Overlay with Three.js permit markers
+ * Atlas3DMap — Google Maps with AdvancedMarkerElement permit pins
  *
- * - Fullscreen via Fullscreen API (⤢ button, or Esc to exit)
- * - Tilt controls: +/− tilt (pitch), rotate left/right (heading)
- * - All POI, business, transit, and administrative labels hidden
- * - ThreeJSOverlayView for 3D cylinder permit markers
+ * Uses AdvancedMarkerElement (no Map ID or WebGL required) for reliable
+ * colored permit pins in the emerald/amber/rose design triad.
+ *
+ * - In-app fullscreen (fills header→bottom nav within the 430px shell)
+ * - Tilt/heading/zoom controls
+ * - Filter by job type
+ * - Click marker to see permit detail panel
+ * - All POI, transit, and admin labels stripped via map styles
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -19,6 +23,7 @@ const JOB_LABELS: Record<string, string> = {
     NB: 'New Building',
     A1: 'Major Alt',
     A2: 'Minor Alt',
+    A3: 'Equipment',
     DM: 'Demolition',
     SG: 'Sign',
     EW: 'Earthwork',
@@ -29,21 +34,34 @@ const JOB_LABELS: Record<string, string> = {
 };
 
 // Color triad — matches design system
-const JOB_COLOR: Record<string, number> = {
-    NB: 0x10b981,   // emerald — Growth
-    A1: 0xf59e0b,   // amber   — Friction
-    A2: 0xf59e0b,   // amber
-    DM: 0xf43f5e,   // rose    — Disruption
-    default: 0xa1a1aa,
-};
-
 const JOB_COLOR_HEX: Record<string, string> = {
-    NB: '#10b981',
-    A1: '#f59e0b',
-    A2: '#f59e0b',
-    DM: '#f43f5e',
+    NB: '#10b981',   // emerald — Growth
+    A1: '#f59e0b',   // amber   — Friction
+    A2: '#f59e0b',   // amber
+    A3: '#f59e0b',   // amber
+    DM: '#f43f5e',   // rose    — Disruption
     default: '#a1a1aa',
 };
+
+// Strip POI, transit, admin labels from the map
+const STRIPPED_MAP_STYLES = [
+    { featureType: 'poi', elementType: 'all', stylers: [{ visibility: 'off' }] },
+    { featureType: 'transit', elementType: 'all', stylers: [{ visibility: 'off' }] },
+    { featureType: 'administrative', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+    { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+    { featureType: 'landscape.man_made', elementType: 'all', stylers: [{ visibility: 'simplified' }] },
+    // Dark base
+    { elementType: 'geometry', stylers: [{ color: '#1c1c1e' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#111111' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2d2d2f' }] },
+    { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#3a3a3c' }] },
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#4a4a4c' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0a1628' }] },
+    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#1e3a5f' }] },
+    { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#141416' }] },
+    { featureType: 'park', elementType: 'geometry', stylers: [{ color: '#0f1f0f' }] },
+];
 
 const FILTERS: { id: Filter; label: string }[] = [
     { id: 'ALL', label: 'All Permits' },
@@ -54,18 +72,27 @@ const FILTERS: { id: Filter; label: string }[] = [
 
 function filterPermits(permits: PermitMarker[], filter: Filter) {
     if (filter === 'ALL') return permits;
-    if (filter === 'A1') return permits.filter(p => p.jobType === 'A1' || p.jobType === 'A2');
+    if (filter === 'A1') return permits.filter(p => p.jobType === 'A1' || p.jobType === 'A2' || p.jobType === 'A3');
     return permits.filter(p => p.jobType === filter);
 }
 
-// NOTE: We cannot use styles[] with WebGL/3D maps — styles require a Map ID.
-// We apply mapTypeId + backgroundColor to get the darkest possible base,
-// and suppress POI/transit entirely via clickableIcons + a post-init style
-// workaround. The map will use ROADMAP type which supports v=beta tilt.
-//
-// For a fully custom dark style on a 3D map you need a Maps Platform Map ID
-// with Cloud Styling configured. Set NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID in .env.local.
-// Without it we fall back to the standard roadmap (lighter) but still functional.
+/** Build a colored SVG pin element for AdvancedMarkerElement */
+function buildPinElement(jobType: string, highlight = false): HTMLElement {
+    const color = JOB_COLOR_HEX[jobType] ?? JOB_COLOR_HEX.default;
+    const size = highlight ? 18 : 12;
+    const el = document.createElement('div');
+    el.style.cssText = `
+        width: ${size}px;
+        height: ${size}px;
+        border-radius: 50%;
+        background: ${color};
+        border: 2px solid ${highlight ? '#fff' : color + 'aa'};
+        box-shadow: 0 0 ${highlight ? 10 : 6}px ${color}88;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    `;
+    return el;
+}
 
 interface Atlas3DMapProps { className?: string }
 
@@ -73,31 +100,22 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
     const searchParams = useSearchParams();
     const focusNeighbor = searchParams.get('focus');
 
-    const wrapperRef = useRef<HTMLDivElement>(null);   // fullscreen target
-    const mapRef     = useRef<HTMLDivElement>(null);   // google maps mount
+    const mapRef      = useRef<HTMLDivElement>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mapInstance = useRef<any>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const overlayRef  = useRef<any>(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const meshMapRef  = useRef<Map<string, any>>(new Map());
+    const markersRef  = useRef<Map<string, { marker: any; permit: PermitMarker }>>(new Map());
 
     const [activeFilter, setActiveFilter] = useState<Filter>('ALL');
     const [selected,     setSelected]     = useState<PermitMarker | null>(null);
     const [loaded,       setLoaded]       = useState(false);
     const [apiError,     setApiError]     = useState(false);
-    const [threeError,   setThreeError]   = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
 
-    // ── Fullscreen handling ───────────────────────────────────────────────────
-    // We expand within the app shell (fills from below the header to above the
-    // bottom nav) rather than using the native Fullscreen API, which doesn't
-    // respect the max-w-[430px] phone shell or the bottom nav.
-    const toggleFullscreen = useCallback(() => {
-        setIsFullscreen(f => !f);
-    }, []);
+    // ── Fullscreen: expand within the app shell ───────────────────────────────
+    const toggleFullscreen = useCallback(() => setIsFullscreen(f => !f), []);
 
-    // ── Tilt / heading controls ───────────────────────────────────────────────
+    // ── Camera controls ───────────────────────────────────────────────────────
     function adjustTilt(delta: number) {
         const map = mapInstance.current;
         if (!map) return;
@@ -115,9 +133,9 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
     function resetView() {
         const map = mapInstance.current;
         if (!map) return;
-        map.setTilt(60);
+        map.setTilt(45);
         map.setHeading(0);
-        map.setZoom(13);
+        map.setZoom(12);
     }
 
     // ── Map initialisation ────────────────────────────────────────────────────
@@ -134,7 +152,8 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
         }
 
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization,geometry,marker&v=beta`;
+        // Include 'marker' library for AdvancedMarkerElement
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=marker&v=beta`;
         script.async = true;
         script.defer = true;
         script.onload  = () => initMap();
@@ -146,7 +165,8 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
             const google = (window as any).google;
             if (!google?.maps || !mapRef.current) return;
 
-            let center = { lat: 40.7128, lng: -73.9562 };
+            // Determine center from focus param or default to Manhattan
+            let center = { lat: 40.7580, lng: -73.9855 }; // Midtown Manhattan
             if (focusNeighbor) {
                 const match = permitsGeo.find(p =>
                     p.neighborhood.toLowerCase().includes(focusNeighbor.toLowerCase()) ||
@@ -155,126 +175,133 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 if (match) center = { lat: match.lat, lng: match.lng };
             }
 
-            const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
-
             const map = new google.maps.Map(mapRef.current, {
                 center,
-                zoom: 13,
-                tilt: 60,
+                zoom: 12,
+                tilt: 45,
                 heading: 0,
-                // mapId enables WebGL + cloud styling (dark theme if configured)
-                // Without a Map ID, 3D/tilt still works but uses default light theme
-                ...(mapId ? { mapId } : {}),
                 mapTypeId: 'roadmap',
                 disableDefaultUI: true,
-                zoomControl: false,         // we provide our own controls
+                zoomControl: false,
                 gestureHandling: 'greedy',
-                backgroundColor: '#09090b',
-                clickableIcons: false,      // disable POI click bubbles
+                backgroundColor: '#0d0d0f',
+                clickableIcons: false,
+                styles: STRIPPED_MAP_STYLES,
             });
 
             mapInstance.current = map;
 
-            // ── Bootstrap Three.js overlay ────────────────────────────────────
-            try {
-                const THREE = await import('three');
-                const { ThreeJSOverlayView } = await import('@googlemaps/three');
+            // ── Place AdvancedMarkerElement pins ──────────────────────────────
+            // AdvancedMarkerElement requires the 'marker' library (v=beta)
+            const AdvancedMarkerElement = google.maps.marker?.AdvancedMarkerElement;
 
-                const overlay = new ThreeJSOverlayView({
-                    map,
-                    anchor: { lat: center.lat, lng: center.lng, altitude: 0 },
-                    upAxis: 'Y',
-                    animationMode: 'ondemand',
-                });
-
-                overlayRef.current = overlay;
-
-                buildPermitMeshes(overlay, THREE, filterPermits(permitsGeo, 'ALL'));
-
-                mapRef.current?.addEventListener('click', (e: MouseEvent) => {
-                    if (!mapRef.current) return;
-                    const rect = mapRef.current.getBoundingClientRect();
-                    const x =   ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
-                    const y = -(((e.clientY - rect.top)   / rect.height) * 2 - 1);
-                    const hits = overlay.raycast({ x, y }, [...meshMapRef.current.values()], { recursive: false });
-                    if (hits.length > 0) {
-                        const hitId = hits[0].object.userData?.permitId as string | undefined;
-                        if (hitId) {
-                            const permit = permitsGeo.find(p => `${p.lat},${p.lng}` === hitId);
-                            setSelected(permit ?? null);
-                        }
-                    } else {
-                        setSelected(null);
-                    }
-                });
-
-                setLoaded(true);
-                overlay.requestRedraw();
-
-            } catch (err) {
-                console.error('[Atlas3DMap] Three.js overlay failed:', err);
-                setThreeError(true);
-                setLoaded(true);
+            if (!AdvancedMarkerElement) {
+                // Fallback to legacy Marker if AdvancedMarkerElement not available
+                placeLegacyMarkers(google, map, permitsGeo);
+            } else {
+                placeAdvancedMarkers(google, AdvancedMarkerElement, map, permitsGeo);
             }
+
+            setLoaded(true);
         }
 
-        function buildPermitMeshes(
+        function placeAdvancedMarkers(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            overlay: any,
+            google: any,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            THREE: any,
+            AdvancedMarkerElement: any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            map: any,
             permits: PermitMarker[]
         ) {
-            meshMapRef.current.forEach(mesh => overlay.scene.remove(mesh));
-            meshMapRef.current.clear();
-
-            const geometry = new THREE.CylinderGeometry(2, 2, 40, 8);
-
             permits.forEach(permit => {
-                const colorHex = JOB_COLOR[permit.jobType] ?? JOB_COLOR.default;
-                const material = new THREE.MeshStandardMaterial({
-                    color: colorHex,
-                    emissive: colorHex,
-                    emissiveIntensity: 0.6,
-                    transparent: true,
-                    opacity: 0.88,
-                    roughness: 0.3,
-                    metalness: 0.2,
+                const pinEl = buildPinElement(permit.jobType, false);
+                const marker = new AdvancedMarkerElement({
+                    map,
+                    position: { lat: permit.lat, lng: permit.lng },
+                    content: pinEl,
+                    title: `${permit.address} — ${JOB_LABELS[permit.jobType] ?? permit.jobType}`,
                 });
 
-                const mesh = new THREE.Mesh(geometry, material);
-                const position = overlay.latLngAltitudeToVector3({
-                    lat: permit.lat,
-                    lng: permit.lng,
-                    altitude: 20,
+                const id = `${permit.lat},${permit.lng}`;
+                markersRef.current.set(id, { marker, permit });
+
+                marker.addListener('click', () => {
+                    // Deselect previous
+                    markersRef.current.forEach(({ marker: m, permit: p }, key) => {
+                        if (m.content) {
+                            const isSelected = key === id;
+                            const newEl = buildPinElement(p.jobType, isSelected);
+                            m.content = newEl;
+                        }
+                    });
+                    setSelected(permit);
+
+                    // Pan to marker
+                    map.panTo({ lat: permit.lat, lng: permit.lng });
                 });
-                mesh.position.copy(position);
-                mesh.userData.permitId = `${permit.lat},${permit.lng}`;
-                overlay.scene.add(mesh);
-                meshMapRef.current.set(mesh.userData.permitId, mesh);
             });
+        }
 
-            overlay.requestRedraw();
+        function placeLegacyMarkers(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            google: any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            map: any,
+            permits: PermitMarker[]
+        ) {
+            // Legacy Marker fallback — colored circle via SVG path
+            permits.forEach(permit => {
+                const color = JOB_COLOR_HEX[permit.jobType] ?? JOB_COLOR_HEX.default;
+                const marker = new google.maps.Marker({
+                    map,
+                    position: { lat: permit.lat, lng: permit.lng },
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 7,
+                        fillColor: color,
+                        fillOpacity: 0.85,
+                        strokeColor: color,
+                        strokeWeight: 1.5,
+                    },
+                    title: `${permit.address} — ${JOB_LABELS[permit.jobType] ?? permit.jobType}`,
+                });
+
+                const id = `${permit.lat},${permit.lng}`;
+                markersRef.current.set(id, { marker, permit });
+
+                marker.addListener('click', () => {
+                    setSelected(permit);
+                    map.panTo({ lat: permit.lat, lng: permit.lng });
+                });
+            });
         }
 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // ── Filter handler ────────────────────────────────────────────────────────
     function handleFilter(f: Filter) {
         setActiveFilter(f);
         setSelected(null);
-        const overlay = overlayRef.current;
-        if (!overlay) return;
-        const filtered = filterPermits(permitsGeo, f);
-        const visibleIds = new Set(filtered.map(p => `${p.lat},${p.lng}`));
-        meshMapRef.current.forEach((mesh, id) => { mesh.visible = visibleIds.has(id); });
-        overlay.requestRedraw();
+        const visible = new Set(filterPermits(permitsGeo, f).map(p => `${p.lat},${p.lng}`));
+        markersRef.current.forEach(({ marker }, id) => {
+            const show = visible.has(id);
+            // AdvancedMarkerElement uses .map, legacy uses .setMap
+            if (typeof marker.setMap === 'function') {
+                marker.setMap(show ? mapInstance.current : null);
+            } else {
+                marker.map = show ? mapInstance.current : null;
+            }
+        });
     }
 
     const counts = permitsGeo.reduce<Record<string, number>>((acc, p) => {
         acc[p.jobType] = (acc[p.jobType] ?? 0) + 1;
         return acc;
     }, {});
+
+    const totalA1 = (counts['A1'] ?? 0) + (counts['A2'] ?? 0) + (counts['A3'] ?? 0);
 
     if (apiError) {
         return (
@@ -283,14 +310,13 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     <span className="text-3xl">🗺️</span>
                     <p className="text-white font-semibold text-sm">Google Maps API key required</p>
                     <p className="text-zinc-500 text-xs max-w-xs">
-                        Add <code className="text-emerald-400 bg-zinc-900 px-1.5 rounded font-mono text-[11px]">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to enable the 3D Atlas.
+                        Add <code className="text-emerald-400 bg-zinc-900 px-1.5 rounded font-mono text-[11px]">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to enable the Atlas.
                     </p>
                 </div>
             </div>
         );
     }
 
-    // Shared button style for overlay controls
     const ctrlBtn = 'flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all text-sm font-mono select-none active:scale-95';
 
     return (
@@ -302,7 +328,7 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     const count = f.id === 'ALL'
                         ? permitsGeo.length
                         : f.id === 'A1'
-                            ? (counts['A1'] ?? 0) + (counts['A2'] ?? 0)
+                            ? totalA1
                             : (counts[f.id] ?? 0);
                     return (
                         <button
@@ -322,12 +348,11 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 })}
             </div>
 
-            {/* Map wrapper — expands to fill app shell when fullscreen */}
+            {/* Map wrapper */}
             <div
-                ref={wrapperRef}
                 className={`relative overflow-hidden border border-zinc-800/80 transition-none ${
                     isFullscreen
-                        ? 'fixed inset-0 bottom-[64px] z-40 rounded-none mx-0'   // covers header→bottom nav
+                        ? 'fixed inset-0 bottom-[64px] z-40 rounded-none mx-0'
                         : 'mx-4 rounded-xl h-[460px]'
                 }`}
             >
@@ -339,7 +364,7 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/95">
                         <div className="flex flex-col items-center gap-3 text-center">
                             <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse motion-reduce:animate-none" />
-                            <p className="text-zinc-400 text-xs font-mono">Initializing 3D Atlas…</p>
+                            <p className="text-zinc-400 text-xs font-mono">Loading permit data…</p>
                         </div>
                     </div>
                 )}
@@ -347,9 +372,9 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 {/* Status badge — top left */}
                 {loaded && (
                     <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 px-2 py-1 rounded-lg pointer-events-none z-10">
-                        <span className={`w-1.5 h-1.5 rounded-full ${threeError ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
-                            {threeError ? '2D fallback' : '3D · WebGL'}
+                            Live · {permitsGeo.length} permits
                         </span>
                     </div>
                 )}
@@ -357,60 +382,35 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 {/* ── Camera controls — right side ─────────────────────────── */}
                 {loaded && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-10">
-                        {/* Tilt up */}
-                        <button onClick={() => adjustTilt(10)} className={ctrlBtn} title="Tilt up (more overhead)">
-                            ▲
-                        </button>
-                        {/* Tilt down */}
-                        <button onClick={() => adjustTilt(-10)} className={ctrlBtn} title="Tilt down (more perspective)">
-                            ▼
-                        </button>
-                        {/* Separator */}
+                        <button onClick={() => adjustTilt(10)}   className={ctrlBtn} title="Tilt up">▲</button>
+                        <button onClick={() => adjustTilt(-10)}  className={ctrlBtn} title="Tilt down">▼</button>
                         <div className="h-px bg-zinc-800 my-0.5" />
-                        {/* Rotate left */}
-                        <button onClick={() => adjustHeading(-22.5)} className={ctrlBtn} title="Rotate left">
-                            ↺
-                        </button>
-                        {/* Rotate right */}
-                        <button onClick={() => adjustHeading(22.5)} className={ctrlBtn} title="Rotate right">
-                            ↻
-                        </button>
-                        {/* Separator */}
+                        <button onClick={() => adjustHeading(-22.5)} className={ctrlBtn} title="Rotate left">↺</button>
+                        <button onClick={() => adjustHeading( 22.5)} className={ctrlBtn} title="Rotate right">↻</button>
                         <div className="h-px bg-zinc-800 my-0.5" />
-                        {/* Zoom in */}
-                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 13) + 1)} className={ctrlBtn} title="Zoom in">
-                            +
-                        </button>
-                        {/* Zoom out */}
-                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 13) - 1)} className={ctrlBtn} title="Zoom out">
-                            −
-                        </button>
-                        {/* Separator */}
+                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 12) + 1)} className={ctrlBtn} title="Zoom in">+</button>
+                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 12) - 1)} className={ctrlBtn} title="Zoom out">−</button>
                         <div className="h-px bg-zinc-800 my-0.5" />
-                        {/* Reset */}
-                        <button onClick={resetView} className={ctrlBtn} title="Reset view">
-                            ⊙
-                        </button>
+                        <button onClick={resetView} className={ctrlBtn} title="Reset view">⊙</button>
                     </div>
                 )}
 
-                {/* ── Fullscreen toggle — top right ────────────────────────── */}
+                {/* Fullscreen toggle — top right */}
                 {loaded && (
                     <button
                         onClick={toggleFullscreen}
                         className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all text-base select-none active:scale-95"
                         title={isFullscreen ? 'Collapse map' : 'Expand map'}
-                        aria-label={isFullscreen ? 'Collapse map' : 'Expand map'}
                     >
                         {isFullscreen ? '⊡' : '⤢'}
                     </button>
                 )}
 
-                {/* Gesture hint — bottom left */}
-                {loaded && !threeError && (
+                {/* Gesture hint */}
+                {loaded && (
                     <div className="absolute bottom-3 left-3 pointer-events-none z-10">
                         <p className="text-[9px] font-mono text-zinc-600">
-                            Drag to pan · Scroll to zoom · Right-drag to tilt & rotate
+                            Tap a pin · Drag to pan · Scroll to zoom
                         </p>
                     </div>
                 )}
@@ -423,7 +423,13 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     style={{ borderLeftColor: JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa' }}
                 >
                     <button
-                        onClick={() => setSelected(null)}
+                        onClick={() => {
+                            setSelected(null);
+                            // Reset all pins to normal size
+                            markersRef.current.forEach(({ marker: m, permit: p }) => {
+                                if (m.content) m.content = buildPinElement(p.jobType, false);
+                            });
+                        }}
                         className="absolute top-3 right-3 text-zinc-500 hover:text-zinc-300 text-lg leading-none"
                         aria-label="Close"
                     >×</button>
@@ -461,7 +467,7 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     <span className="w-2 h-2 rounded-full bg-rose-400" />
                     <span className="text-rose-500">▼ Demolition</span>
                 </span>
-                <span className="ml-auto text-zinc-700">{permitsGeo.length} permits · 3D markers</span>
+                <span className="ml-auto text-zinc-700">{permitsGeo.length} permits</span>
             </div>
         </div>
     );
