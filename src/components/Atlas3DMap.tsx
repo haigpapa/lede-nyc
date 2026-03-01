@@ -3,19 +3,13 @@
 /**
  * Atlas3DMap — Google Maps WebGL Overlay with Three.js permit markers
  *
- * Uses @googlemaps/three (ThreeJSOverlayView) to render georeferenced 3D
- * cylinder markers on top of Google Maps in WebGL mode. Each permit is a
- * glowing vertical pin that hovers above the map surface, color-coded by
- * job type (emerald=New Buildings, amber=Alterations, rose=Demolitions).
- *
- * The map starts tilted at 60° and rotates slowly for the intro, then settles
- * into user-interactive mode. Click any cylinder to see permit details.
- *
- * Requires: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY with Maps JS API enabled.
- * The Maps JS API is loaded with &map_ids= so WebGLOverlayView is available.
+ * - Fullscreen via Fullscreen API (⤢ button, or Esc to exit)
+ * - Tilt controls: +/− tilt (pitch), rotate left/right (heading)
+ * - All POI, business, transit, and administrative labels hidden
+ * - ThreeJSOverlayView for 3D cylinder permit markers
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { permitsGeo, type PermitMarker } from '@/data/permits-geo';
 
@@ -64,19 +58,37 @@ function filterPermits(permits: PermitMarker[], filter: Filter) {
     return permits.filter(p => p.jobType === filter);
 }
 
+// Stripped-down dark map: no POI icons, no business labels, no transit icons,
+// no administrative labels — only roads, water, parks, and street names.
 const DARK_MAP_STYLE = [
-    { elementType: 'geometry',             stylers: [{ color: '#09090b' }] },
-    { elementType: 'labels.text.stroke',   stylers: [{ color: '#09090b' }] },
-    { elementType: 'labels.text.fill',     stylers: [{ color: '#52525b' }] },
-    { featureType: 'road',                 elementType: 'geometry',        stylers: [{ color: '#18181b' }] },
-    { featureType: 'road',                 elementType: 'geometry.stroke', stylers: [{ color: '#27272a' }] },
-    { featureType: 'road',                 elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
-    { featureType: 'road.highway',         elementType: 'geometry',        stylers: [{ color: '#1c1c1f' }] },
-    { featureType: 'water',                elementType: 'geometry',        stylers: [{ color: '#0c1a2e' }] },
-    { featureType: 'poi',                  elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
-    { featureType: 'poi.park',             elementType: 'geometry',        stylers: [{ color: '#0f2016' }] },
-    { featureType: 'transit',              elementType: 'geometry',        stylers: [{ color: '#18181b' }] },
-    { featureType: 'transit.station',      elementType: 'labels.text.fill', stylers: [{ color: '#52525b' }] },
+    // Base geometry: near-black
+    { elementType: 'geometry',              stylers: [{ color: '#09090b' }] },
+    { elementType: 'labels.text.stroke',    stylers: [{ color: '#09090b' }] },
+    { elementType: 'labels.text.fill',      stylers: [{ color: '#52525b' }] },
+    // Roads
+    { featureType: 'road',                  elementType: 'geometry',         stylers: [{ color: '#18181b' }] },
+    { featureType: 'road',                  elementType: 'geometry.stroke',  stylers: [{ color: '#27272a' }] },
+    { featureType: 'road',                  elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
+    { featureType: 'road.highway',          elementType: 'geometry',         stylers: [{ color: '#1c1c1f' }] },
+    // Water: deep navy
+    { featureType: 'water',                 elementType: 'geometry',         stylers: [{ color: '#0c1a2e' }] },
+    { featureType: 'water',                 elementType: 'labels.text.fill', stylers: [{ visibility: 'off' }] },
+    // Parks: very dark green
+    { featureType: 'poi.park',              elementType: 'geometry',         stylers: [{ color: '#0f2016' }] },
+    { featureType: 'poi.park',              elementType: 'labels',           stylers: [{ visibility: 'off' }] },
+    // Hide ALL other POI (restaurants, shops, cafes, attractions, etc.)
+    { featureType: 'poi',                   elementType: 'labels',           stylers: [{ visibility: 'off' }] },
+    { featureType: 'poi',                   elementType: 'geometry',         stylers: [{ color: '#111113' }] },
+    // Hide transit icons and labels
+    { featureType: 'transit',               elementType: 'geometry',         stylers: [{ color: '#18181b' }] },
+    { featureType: 'transit',               elementType: 'labels',           stylers: [{ visibility: 'off' }] },
+    { featureType: 'transit.station',       elementType: 'labels',           stylers: [{ visibility: 'off' }] },
+    // Hide administrative (neighborhood, city, county labels) — keep only road names
+    { featureType: 'administrative',        elementType: 'labels',           stylers: [{ visibility: 'off' }] },
+    { featureType: 'administrative.land_parcel', elementType: 'labels',      stylers: [{ visibility: 'off' }] },
+    { featureType: 'administrative.neighborhood', elementType: 'labels',     stylers: [{ visibility: 'off' }] },
+    // Landscape
+    { featureType: 'landscape',             elementType: 'geometry',         stylers: [{ color: '#0d0d0f' }] },
 ];
 
 interface Atlas3DMapProps { className?: string }
@@ -85,20 +97,63 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
     const searchParams = useSearchParams();
     const focusNeighbor = searchParams.get('focus');
 
-    const mapRef = useRef<HTMLDivElement>(null);
+    const wrapperRef = useRef<HTMLDivElement>(null);   // fullscreen target
+    const mapRef     = useRef<HTMLDivElement>(null);   // google maps mount
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mapInstance = useRef<any>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const overlayRef = useRef<any>(null);
+    const overlayRef  = useRef<any>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const meshMapRef = useRef<Map<string, any>>(new Map());
+    const meshMapRef  = useRef<Map<string, any>>(new Map());
 
     const [activeFilter, setActiveFilter] = useState<Filter>('ALL');
-    const [selected, setSelected] = useState<PermitMarker | null>(null);
-    const [loaded, setLoaded] = useState(false);
-    const [apiError, setApiError] = useState(false);
-    const [threeError, setThreeError] = useState(false);
+    const [selected,     setSelected]     = useState<PermitMarker | null>(null);
+    const [loaded,       setLoaded]       = useState(false);
+    const [apiError,     setApiError]     = useState(false);
+    const [threeError,   setThreeError]   = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
+    // ── Fullscreen handling ───────────────────────────────────────────────────
+    const toggleFullscreen = useCallback(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        if (!document.fullscreenElement) {
+            el.requestFullscreen().catch(err => console.warn('[Atlas3DMap] fullscreen:', err));
+        } else {
+            document.exitFullscreen();
+        }
+    }, []);
+
+    useEffect(() => {
+        const handler = () => setIsFullscreen(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', handler);
+        return () => document.removeEventListener('fullscreenchange', handler);
+    }, []);
+
+    // ── Tilt / heading controls ───────────────────────────────────────────────
+    function adjustTilt(delta: number) {
+        const map = mapInstance.current;
+        if (!map) return;
+        const current = (map.getTilt?.() as number | undefined) ?? 45;
+        map.setTilt(Math.min(67.5, Math.max(0, current + delta)));
+    }
+
+    function adjustHeading(delta: number) {
+        const map = mapInstance.current;
+        if (!map) return;
+        const current = (map.getHeading?.() as number | undefined) ?? 0;
+        map.setHeading((current + delta + 360) % 360);
+    }
+
+    function resetView() {
+        const map = mapInstance.current;
+        if (!map) return;
+        map.setTilt(60);
+        map.setHeading(0);
+        map.setZoom(13);
+    }
+
+    // ── Map initialisation ────────────────────────────────────────────────────
     useEffect(() => {
         if (!mapRef.current || mapInstance.current) return;
 
@@ -112,11 +167,10 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
         }
 
         const script = document.createElement('script');
-        // We need the 'geometry' library for coordinate math + 'marker' for AdvancedMarkerElement
         script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization,geometry,marker&v=beta`;
         script.async = true;
         script.defer = true;
-        script.onload = () => initMap();
+        script.onload  = () => initMap();
         script.onerror = () => setApiError(true);
         document.head.appendChild(script);
 
@@ -125,7 +179,6 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
             const google = (window as any).google;
             if (!google?.maps || !mapRef.current) return;
 
-            // Determine center — focus on searched neighborhood, or default to mid-NYC
             let center = { lat: 40.7128, lng: -73.9562 };
             if (focusNeighbor) {
                 const match = permitsGeo.find(p =>
@@ -138,16 +191,14 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
             const map = new google.maps.Map(mapRef.current, {
                 center,
                 zoom: 13,
-                tilt: 60,          // 3D perspective tilt
+                tilt: 60,
                 heading: 0,
                 styles: DARK_MAP_STYLE,
                 disableDefaultUI: true,
-                zoomControl: true,
-                zoomControlOptions: {
-                    position: google.maps.ControlPosition.RIGHT_BOTTOM,
-                },
+                zoomControl: false,         // we provide our own controls
                 gestureHandling: 'greedy',
                 backgroundColor: '#09090b',
+                clickableIcons: false,      // disable POI click bubbles
             });
 
             mapInstance.current = map;
@@ -166,15 +217,13 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
 
                 overlayRef.current = overlay;
 
-                // Build permit cylinders
                 buildPermitMeshes(overlay, THREE, filterPermits(permitsGeo, 'ALL'));
 
-                // Raycasting — click to select permit
                 mapRef.current?.addEventListener('click', (e: MouseEvent) => {
                     if (!mapRef.current) return;
                     const rect = mapRef.current.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                    const x =   ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
+                    const y = -(((e.clientY - rect.top)   / rect.height) * 2 - 1);
                     const hits = overlay.raycast({ x, y }, [...meshMapRef.current.values()], { recursive: false });
                     if (hits.length > 0) {
                         const hitId = hits[0].object.userData?.permitId as string | undefined;
@@ -204,7 +253,6 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
             THREE: any,
             permits: PermitMarker[]
         ) {
-            // Clear existing
             meshMapRef.current.forEach(mesh => overlay.scene.remove(mesh));
             meshMapRef.current.clear();
 
@@ -223,17 +271,13 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 });
 
                 const mesh = new THREE.Mesh(geometry, material);
-
-                // Convert lat/lng → Three.js scene space
                 const position = overlay.latLngAltitudeToVector3({
                     lat: permit.lat,
                     lng: permit.lng,
-                    altitude: 20,   // hover 20m above ground
+                    altitude: 20,
                 });
                 mesh.position.copy(position);
-                mesh.scale.set(1, 1, 1);
                 mesh.userData.permitId = `${permit.lat},${permit.lng}`;
-
                 overlay.scene.add(mesh);
                 meshMapRef.current.set(mesh.userData.permitId, mesh);
             });
@@ -247,17 +291,11 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
     function handleFilter(f: Filter) {
         setActiveFilter(f);
         setSelected(null);
-
-        // Rebuild visible meshes
         const overlay = overlayRef.current;
         if (!overlay) return;
-
         const filtered = filterPermits(permitsGeo, f);
         const visibleIds = new Set(filtered.map(p => `${p.lat},${p.lng}`));
-
-        meshMapRef.current.forEach((mesh, id) => {
-            mesh.visible = visibleIds.has(id);
-        });
+        meshMapRef.current.forEach((mesh, id) => { mesh.visible = visibleIds.has(id); });
         overlay.requestRedraw();
     }
 
@@ -280,6 +318,9 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
         );
     }
 
+    // Shared button style for overlay controls
+    const ctrlBtn = 'flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all text-sm font-mono select-none active:scale-95';
+
     return (
         <div className={`flex flex-col ${className}`}>
 
@@ -296,9 +337,10 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                             key={f.id}
                             onClick={() => handleFilter(f.id)}
                             aria-pressed={activeFilter === f.id}
-                            className={`shrink-0 px-3 py-2 rounded-lg text-xs font-mono font-semibold border transition-all min-h-[36px] flex items-center gap-1.5 ${activeFilter === f.id
-                                ? 'bg-zinc-800 border-zinc-600 text-white'
-                                : 'border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+                            className={`shrink-0 px-3 py-2 rounded-lg text-xs font-mono font-semibold border transition-all min-h-[36px] flex items-center gap-1.5 ${
+                                activeFilter === f.id
+                                    ? 'bg-zinc-800 border-zinc-600 text-white'
+                                    : 'border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
                             }`}
                         >
                             <span>{f.label}</span>
@@ -308,8 +350,14 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                 })}
             </div>
 
-            {/* 3D map container */}
-            <div className="relative mx-4 rounded-xl overflow-hidden border border-zinc-800/80 h-[460px]">
+            {/* Map wrapper — fullscreen target */}
+            <div
+                ref={wrapperRef}
+                className={`relative mx-4 rounded-xl overflow-hidden border border-zinc-800/80 ${
+                    isFullscreen ? 'h-screen rounded-none mx-0' : 'h-[460px]'
+                }`}
+            >
+                {/* Google Maps canvas */}
                 <div ref={mapRef} className="w-full h-full" />
 
                 {/* Loading overlay */}
@@ -322,32 +370,82 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     </div>
                 )}
 
-                {/* 3D mode badge */}
-                {loaded && !threeError && (
-                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 px-2 py-1 rounded-lg pointer-events-none">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">3D · WebGL</span>
+                {/* Status badge — top left */}
+                {loaded && (
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 px-2 py-1 rounded-lg pointer-events-none z-10">
+                        <span className={`w-1.5 h-1.5 rounded-full ${threeError ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
+                            {threeError ? '2D fallback' : '3D · WebGL'}
+                        </span>
                     </div>
                 )}
 
-                {/* Three.js init error — still shows 2D map */}
-                {threeError && (
-                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-rose-900/50 px-2 py-1 rounded-lg pointer-events-none">
-                        <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider">2D fallback</span>
+                {/* ── Camera controls — right side ─────────────────────────── */}
+                {loaded && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-10">
+                        {/* Tilt up */}
+                        <button onClick={() => adjustTilt(10)} className={ctrlBtn} title="Tilt up (more overhead)">
+                            ▲
+                        </button>
+                        {/* Tilt down */}
+                        <button onClick={() => adjustTilt(-10)} className={ctrlBtn} title="Tilt down (more perspective)">
+                            ▼
+                        </button>
+                        {/* Separator */}
+                        <div className="h-px bg-zinc-800 my-0.5" />
+                        {/* Rotate left */}
+                        <button onClick={() => adjustHeading(-22.5)} className={ctrlBtn} title="Rotate left">
+                            ↺
+                        </button>
+                        {/* Rotate right */}
+                        <button onClick={() => adjustHeading(22.5)} className={ctrlBtn} title="Rotate right">
+                            ↻
+                        </button>
+                        {/* Separator */}
+                        <div className="h-px bg-zinc-800 my-0.5" />
+                        {/* Zoom in */}
+                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 13) + 1)} className={ctrlBtn} title="Zoom in">
+                            +
+                        </button>
+                        {/* Zoom out */}
+                        <button onClick={() => mapInstance.current?.setZoom((mapInstance.current.getZoom() ?? 13) - 1)} className={ctrlBtn} title="Zoom out">
+                            −
+                        </button>
+                        {/* Separator */}
+                        <div className="h-px bg-zinc-800 my-0.5" />
+                        {/* Reset */}
+                        <button onClick={resetView} className={ctrlBtn} title="Reset view">
+                            ⊙
+                        </button>
                     </div>
                 )}
 
-                {/* Tilt hint */}
+                {/* ── Fullscreen toggle — top right ────────────────────────── */}
+                {loaded && (
+                    <button
+                        onClick={toggleFullscreen}
+                        className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all text-base select-none active:scale-95"
+                        title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+                        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                    >
+                        {isFullscreen ? '⊠' : '⤢'}
+                    </button>
+                )}
+
+                {/* Gesture hint — bottom left */}
                 {loaded && !threeError && (
-                    <div className="absolute bottom-3 right-3 pointer-events-none">
-                        <p className="text-[9px] font-mono text-zinc-600 text-right">Drag to pan · Pinch or scroll to zoom · Tilt: 60°</p>
+                    <div className="absolute bottom-3 left-3 pointer-events-none z-10">
+                        <p className="text-[9px] font-mono text-zinc-600">
+                            Drag to pan · Scroll to zoom · Right-drag to tilt & rotate
+                        </p>
                     </div>
                 )}
             </div>
 
             {/* Selected permit panel */}
             {selected && (
-                <div className="mx-4 mt-2.5 pl-3 pr-4 py-4 rounded-xl bg-zinc-900/90 border-l-2 border-l-zinc-500 border border-zinc-800 relative animate-fade-in"
+                <div
+                    className="mx-4 mt-2.5 pl-3 pr-4 py-4 rounded-xl bg-zinc-900/90 border-l-2 border border-zinc-800 relative"
                     style={{ borderLeftColor: JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa' }}
                 >
                     <button
@@ -358,7 +456,10 @@ export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
                     <div className="flex items-center gap-2 mb-2">
                         <span
                             className="text-[10px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded border"
-                            style={{ color: JOB_COLOR_HEX[selected.jobType], borderColor: (JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa') + '50' }}
+                            style={{
+                                color: JOB_COLOR_HEX[selected.jobType],
+                                borderColor: (JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa') + '50',
+                            }}
                         >
                             {JOB_LABELS[selected.jobType] ?? selected.jobType}
                         </span>
