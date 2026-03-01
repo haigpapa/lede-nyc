@@ -71,6 +71,7 @@ export interface LedeCardData {
     trend?: number[];
     trendColor?: string;  // hex color for sparkline, defaults to accent
     mapFocus?: string;  // borough or neighborhood name → deeplinks to /atlas?focus=X
+    borough?: string;   // "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"
     // Provenance fields (injected by pipeline)
     dataWindow?: string;         // e.g. "past 7 days"
     provenanceRowCount?: number; // how many anomaly rows matched

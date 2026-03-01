@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
             // Inject SQL provenance into the first card
             if (cards[0]) cards[0].sqlQuery = sql;
 
-            // Post-processing: enforce color triad + inject provenance per card
+            // Post-processing: enforce color triad + inject borough + provenance per card
             cards = cards.map((card, i) => {
                 const anomaly = anomalies[i] ?? anomalies[0];
                 // Override color if Gemini chose wrong color for job type
@@ -79,13 +79,20 @@ export async function GET(req: NextRequest) {
                 if (expectedColor && !validColors.has(card.accentColor)) {
                     accentColor = expectedColor;
                 }
+                // Normalize borough to title case (BigQuery returns uppercase)
+                const borough = card.borough
+                    ? card.borough.charAt(0).toUpperCase() + card.borough.slice(1).toLowerCase()
+                    : anomaly
+                        ? anomaly.borough.charAt(0).toUpperCase() + anomaly.borough.slice(1).toLowerCase()
+                        : undefined;
                 return {
                     ...card,
                     accentColor,
+                    borough,
                     dataWindow: 'past 7 days',
                     provenanceRowCount: anomalies.length,
                     provenanceSampleId: anomaly
-                        ? `ZIP ${anomaly.zip} · ${anomaly.jobType} · ${anomaly.pctChange > 0 ? '+' : ''}${anomaly.pctChange}%`
+                        ? `${anomaly.borough} · ZIP ${anomaly.zip} · ${anomaly.jobType} · ${anomaly.pctChange > 0 ? '+' : ''}${anomaly.pctChange}%`
                         : undefined,
                     provenanceIngestedAt: runStartedAt,
                 };
@@ -107,7 +114,7 @@ export async function GET(req: NextRequest) {
                 generatedAt: runStartedAt,
                 dataWindow: 'past 7 days',
                 source: 'NYC DOB Permits via BigQuery',
-                borough: 'Manhattan',
+                borough: 'All Boroughs',
             },
             cards,
         };

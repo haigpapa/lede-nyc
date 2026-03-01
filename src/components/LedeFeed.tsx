@@ -3,8 +3,9 @@
 import LedeCard from './LedeCard';
 import feedJson from '@/data/feed.json';
 import type { FeedPayload } from '@/types';
+import { useNeighborhood } from '@/context/NeighborhoodContext';
 
-const { meta, cards } = feedJson as unknown as FeedPayload;
+const feedPayload = feedJson as unknown as FeedPayload;
 
 /** Format ISO timestamp → relative time: "just now", "3h ago", "2d ago" */
 function formatRelativeTime(iso: string): string {
@@ -24,6 +25,18 @@ function formatRelativeTime(iso: string): string {
 }
 
 export default function LedeFeed() {
+    const { meta, cards: allCards } = feedPayload;
+    const { profile } = useNeighborhood();
+
+    // Sort: user's borough cards first, then the rest
+    const userBorough = profile?.borough ?? null;
+    const cards = userBorough
+        ? [
+            ...allCards.filter(c => c.borough === userBorough),
+            ...allCards.filter(c => c.borough !== userBorough),
+          ]
+        : allCards;
+
     return (
         <div className="bg-[#09090b] text-slate-100 antialiased min-h-screen font-sans">
             <div className="relative flex min-h-screen w-full flex-col max-w-[430px] mx-auto overflow-x-hidden border-x border-zinc-800">
@@ -47,6 +60,12 @@ export default function LedeFeed() {
 
                 {/* Feed */}
                 <main className="flex-1 p-4 space-y-4">
+                    {/* Borough context chip when sorted */}
+                    {userBorough && (
+                        <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider px-0.5">
+                            Showing {userBorough} first · then all NYC
+                        </p>
+                    )}
                     {cards.map((data, index) => (
                         <LedeCard key={index} {...data} />
                     ))}

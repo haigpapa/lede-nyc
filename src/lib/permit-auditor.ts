@@ -68,10 +68,11 @@ async function bqQuery(sql: string): Promise<Array<{ f: Array<{ v: string }> }>>
 export async function runPermitAuditor(): Promise<{ rows: AnomalyRow[]; sql: string }> {
     // Core anomaly query:
     // Compare last 7 days of permit activity vs 90-day moving average
-    // for key job types in the Hell's Kitchen area (zip 10018 / community board 4)
+    // across all 5 NYC boroughs — frontend sorts by user's borough first
     const sql = `
     WITH all_permits AS (
       SELECT
+        COALESCE(string_field_0, 'UNKNOWN') AS borough,
         COALESCE(string_field_7, 'UNKNOWN') AS zip,
         COALESCE(string_field_6, 'UNKNOWN') AS job_type,
         COALESCE(string_field_9 || ' ' || string_field_11, 'Unknown Address') AS address,
@@ -79,26 +80,26 @@ export async function runPermitAuditor(): Promise<{ rows: AnomalyRow[]; sql: str
       FROM \`lede-nyc-data.civicdata.dob-permits\`
       WHERE string_field_7 IS NOT NULL
         AND string_field_6 IN ('NB', 'A1', 'A2', 'DM', 'SG', 'EW', 'PL', 'FP', 'EQ', 'BL')
-        AND string_field_0 = 'MANHATTAN'
-        AND SAFE_CAST(string_field_7 AS INT64) BETWEEN 10001 AND 10282
+        AND string_field_0 IN ('MANHATTAN', 'BROOKLYN', 'QUEENS', 'BRONX', 'STATEN ISLAND')
     ),
     recent_7d AS (
-      SELECT zip, job_type, COUNT(*) AS cnt_7d,
+      SELECT borough, zip, job_type, COUNT(*) AS cnt_7d,
              ANY_VALUE(address) AS top_address
       FROM all_permits
       WHERE issued_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-      GROUP BY zip, job_type
+      GROUP BY borough, zip, job_type
     ),
     avg_90d AS (
-      SELECT zip, job_type,
+      SELECT borough, zip, job_type,
              COUNT(*) / (90.0 / 7.0) AS avg_per_7d
       FROM all_permits
       WHERE issued_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 97 DAY)
         AND issued_date < DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-      GROUP BY zip, job_type
+      GROUP BY borough, zip, job_type
       HAVING avg_per_7d > 0
     )
     SELECT
+      r.borough,
       r.zip,
       r.job_type,
       r.cnt_7d            AS recent_7d,
@@ -106,21 +107,22 @@ export async function runPermitAuditor(): Promise<{ rows: AnomalyRow[]; sql: str
       ROUND((r.cnt_7d - a.avg_per_7d) / a.avg_per_7d * 100, 1) AS pct_change,
       r.top_address
     FROM recent_7d r
-    JOIN avg_90d a USING (zip, job_type)
+    JOIN avg_90d a USING (borough, zip, job_type)
     WHERE ABS((r.cnt_7d - a.avg_per_7d) / a.avg_per_7d) > 0.25
     ORDER BY ABS(pct_change) DESC
-    LIMIT 20
+    LIMIT 30
   `;
 
     const rawRows = await bqQuery(sql);
 
     const rows: AnomalyRow[] = rawRows.map(r => ({
-        zip: r.f[0].v,
-        jobType: r.f[1].v,
-        recent7d: Number(r.f[2].v),
-        avg90d: Number(r.f[3].v),
-        pctChange: Number(r.f[4].v),
-        topAddress: r.f[5].v,
+        borough: r.f[0].v,
+        zip: r.f[1].v,
+        jobType: r.f[2].v,
+        recent7d: Number(r.f[3].v),
+        avg90d: Number(r.f[4].v),
+        pctChange: Number(r.f[5].v),
+        topAddress: r.f[6].v,
     }));
 
     return { rows, sql };

@@ -197,8 +197,8 @@ export default function OnboardPage() {
                     <div className="flex flex-col gap-2">
                         <LedeLogo />
                         <p className="text-zinc-400 text-sm leading-relaxed mt-2">
-                            Manhattan's autonomous civic intelligence.<br />
-                            Enter your block to initialize your brief.
+                            NYC's autonomous civic intelligence.<br />
+                            Enter your ZIP to initialize your brief.
                         </p>
                     </div>
 

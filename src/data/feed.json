@@ -4,7 +4,7 @@
         "generatedAt": "2026-03-01T11:00:00Z",
         "dataWindow": "past 7 days",
         "source": "NYC DOB Permits via BigQuery",
-        "borough": "Manhattan"
+        "borough": "All Boroughs"
     },
     "cards": [
         {
@@ -13,11 +13,12 @@
             "accentColor": "emerald",
             "headline": "Pipeline Initializing — First Brief at 6am",
             "bullets": [
-                "The autonomous pipeline runs daily at 6am ET, querying NYC DOB permit data from BigQuery.",
-                "Manhattan construction anomalies — spikes more than 25% above the 90-day average — will appear here.",
+                "The autonomous pipeline runs daily at 6am ET, querying NYC DOB permit data across all 5 boroughs.",
+                "Construction anomalies — spikes more than 25% above the 90-day average — will appear sorted by your neighborhood first.",
                 "All data is sourced directly from NYC Open Data with zero editorial bias. Check back tomorrow."
             ],
             "timestamp": "2026-03-01T11:00:00Z",
+            "borough": "Manhattan",
             "mapFocus": "manhattan",
             "sqlQuery": ""
         }

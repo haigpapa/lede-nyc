@@ -2,6 +2,7 @@
 // Uses the Gemini REST API directly — no npm package needed
 
 export interface AnomalyRow {
+    borough: string;  // "MANHATTAN", "BROOKLYN", "QUEENS", "BRONX", "STATEN ISLAND"
     zip: string;
     jobType: string;
     recent7d: number;
@@ -17,13 +18,14 @@ export interface LedeCard {
     headline: string;
     bullets: string[];
     timestamp: string;
+    borough?: string;    // "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"
     mapFocus?: string;
     sqlQuery?: string;
 }
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-const SYSTEM_PROMPT = `You are the Lede.nyc Civic Translator. Your job is to turn NYC construction permit anomaly data into clear, engaging news summaries for Manhattan residents.
+const SYSTEM_PROMPT = `You are the Lede.nyc Civic Translator. Your job is to turn NYC construction permit anomaly data into clear, engaging news summaries for NYC residents. Each card covers ONE borough and ONE anomaly story.
 
 STRICT RULES:
 1. Write at a 6th-grade reading level. No jargon.
@@ -37,33 +39,41 @@ STRICT RULES:
    Never use sky, violet, or orange.
 6. If data is ambiguous or missing, generate a card that says so clearly. Do NOT make up stats.
 7. Output ONLY valid JSON — no markdown, no explanation, no extra text.
-8. ALL content must be about Manhattan neighborhoods only. Never reference Brooklyn, Queens, the Bronx, or Staten Island in headlines or bullets.
-9. mapFocus must always be a Manhattan neighborhood slug matching the anomaly ZIP code. Use this mapping:
-   10001=chelsea, 10002=lower-east-side, 10003=east-village, 10004=financial-district,
-   10005=financial-district, 10006=financial-district, 10007=civic-center, 10009=east-village,
+8. borough field: use title case — "Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island".
+   Match the borough from the input data exactly.
+9. mapFocus: use neighborhood slug from this ZIP mapping:
+   Manhattan — 10001=chelsea, 10002=lower-east-side, 10003=east-village, 10009=east-village,
    10010=gramercy, 10011=chelsea, 10012=soho, 10013=tribeca, 10014=west-village,
    10016=murray-hill, 10017=midtown, 10018=hells-kitchen, 10019=midtown-west,
-   10020=midtown, 10021=upper-east-side, 10022=midtown-east, 10023=upper-west-side,
-   10024=upper-west-side, 10025=upper-west-side, 10026=harlem, 10027=harlem,
-   10028=upper-east-side, 10029=east-harlem, 10030=harlem, 10031=washington-heights,
-   10032=washington-heights, 10033=washington-heights, 10034=inwood, 10035=east-harlem,
-   10036=hells-kitchen, 10037=harlem, 10038=financial-district, 10039=harlem,
-   10040=inwood, 10044=roosevelt-island, 10065=upper-east-side, 10069=upper-west-side,
-   10075=upper-east-side, 10128=upper-east-side, 10280=battery-park-city, 10282=battery-park-city`;
+   10021=upper-east-side, 10022=midtown-east, 10023=upper-west-side, 10024=upper-west-side,
+   10025=upper-west-side, 10026=harlem, 10027=harlem, 10028=upper-east-side,
+   10029=east-harlem, 10031=washington-heights, 10033=washington-heights, 10034=inwood,
+   10036=hells-kitchen, 10040=inwood, 10065=upper-east-side, 10128=upper-east-side
+   Brooklyn — 11201=brooklyn-heights, 11205=clinton-hill, 11206=bushwick, 11207=east-new-york,
+   11211=williamsburg, 11213=crown-heights, 11215=park-slope, 11216=bed-stuy,
+   11217=boerum-hill, 11221=bushwick-north, 11222=greenpoint, 11225=flatbush,
+   11231=red-hook, 11232=sunset-park, 11238=prospect-heights
+   Queens — 11354=flushing, 11355=flushing, 11368=corona, 11373=elmhurst,
+   11375=forest-hills, 11385=glendale, 11419=south-ozone-park
+   Bronx — 10451=mott-haven, 10452=highbridge, 10456=morrisania, 10460=west-farms, 10463=kingsbridge
+   Staten Island — 10301=st-george, 10314=willowbrook
+   For any ZIP not listed, use the borough name as the slug (e.g. "brooklyn", "queens")`;
 
 const USER_PROMPT_TEMPLATE = (rows: AnomalyRow[], date: string) => `
-Today is ${date}. Here are the Manhattan permit anomalies detected by the Lede.nyc BigQuery pipeline:
+Today is ${date}. Here are the NYC permit anomalies detected by the Lede.nyc BigQuery pipeline across all 5 boroughs:
 
 ${JSON.stringify(rows, null, 2)}
 
-Generate a JSON array of 1–3 LedeCard objects. Each must have:
+Generate a JSON array of LedeCard objects — one card per notable anomaly (max 4 cards total).
+Group anomalies by borough when the story is the same. Each card must have:
 - category: short category name (e.g. "Construction", "Housing", "Demolitions", "Infrastructure")
 - emoji: one relevant emoji
 - accentColor: emerald (NB/A1 permits), amber (A2/SG/EW/BL permits), or rose (DM/FP/EQ permits)
-- headline: punchy headline ≤ 10 words, specific to Manhattan neighborhood
-- bullets: array of exactly 3 strings, Manhattan-only content
+- headline: punchy headline ≤ 10 words, name the specific neighborhood
+- bullets: array of exactly 3 strings
 - timestamp: "${date}T06:00:00Z"
-- mapFocus: Manhattan neighborhood slug derived from the anomaly ZIP code (use the mapping in your instructions)
+- borough: title-case borough name ("Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island")
+- mapFocus: neighborhood slug from the ZIP mapping in your instructions
 - sqlQuery: leave as empty string ""
 
 Output ONLY the JSON array. No markdown fences. No explanation.`;
