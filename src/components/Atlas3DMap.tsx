@@ -1,0 +1,393 @@
+'use client';
+
+/**
+ * Atlas3DMap — Google Maps WebGL Overlay with Three.js permit markers
+ *
+ * Uses @googlemaps/three (ThreeJSOverlayView) to render georeferenced 3D
+ * cylinder markers on top of Google Maps in WebGL mode. Each permit is a
+ * glowing vertical pin that hovers above the map surface, color-coded by
+ * job type (emerald=New Buildings, amber=Alterations, rose=Demolitions).
+ *
+ * The map starts tilted at 60° and rotates slowly for the intro, then settles
+ * into user-interactive mode. Click any cylinder to see permit details.
+ *
+ * Requires: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY with Maps JS API enabled.
+ * The Maps JS API is loaded with &map_ids= so WebGLOverlayView is available.
+ */
+
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { permitsGeo, type PermitMarker } from '@/data/permits-geo';
+
+type Filter = 'ALL' | 'NB' | 'A1' | 'DM';
+
+const JOB_LABELS: Record<string, string> = {
+    NB: 'New Building',
+    A1: 'Major Alt',
+    A2: 'Minor Alt',
+    DM: 'Demolition',
+    SG: 'Sign',
+    EW: 'Earthwork',
+    BL: 'Boiler',
+    FP: 'Fire Suppression',
+    EQ: 'Equipment',
+    PL: 'Plumbing',
+};
+
+// Color triad — matches design system
+const JOB_COLOR: Record<string, number> = {
+    NB: 0x10b981,   // emerald — Growth
+    A1: 0xf59e0b,   // amber   — Friction
+    A2: 0xf59e0b,   // amber
+    DM: 0xf43f5e,   // rose    — Disruption
+    default: 0xa1a1aa,
+};
+
+const JOB_COLOR_HEX: Record<string, string> = {
+    NB: '#10b981',
+    A1: '#f59e0b',
+    A2: '#f59e0b',
+    DM: '#f43f5e',
+    default: '#a1a1aa',
+};
+
+const FILTERS: { id: Filter; label: string }[] = [
+    { id: 'ALL', label: 'All Permits' },
+    { id: 'NB',  label: '▲ New Buildings' },
+    { id: 'A1',  label: '◆ Alterations' },
+    { id: 'DM',  label: '▼ Demolitions' },
+];
+
+function filterPermits(permits: PermitMarker[], filter: Filter) {
+    if (filter === 'ALL') return permits;
+    if (filter === 'A1') return permits.filter(p => p.jobType === 'A1' || p.jobType === 'A2');
+    return permits.filter(p => p.jobType === filter);
+}
+
+const DARK_MAP_STYLE = [
+    { elementType: 'geometry',             stylers: [{ color: '#09090b' }] },
+    { elementType: 'labels.text.stroke',   stylers: [{ color: '#09090b' }] },
+    { elementType: 'labels.text.fill',     stylers: [{ color: '#52525b' }] },
+    { featureType: 'road',                 elementType: 'geometry',        stylers: [{ color: '#18181b' }] },
+    { featureType: 'road',                 elementType: 'geometry.stroke', stylers: [{ color: '#27272a' }] },
+    { featureType: 'road',                 elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
+    { featureType: 'road.highway',         elementType: 'geometry',        stylers: [{ color: '#1c1c1f' }] },
+    { featureType: 'water',                elementType: 'geometry',        stylers: [{ color: '#0c1a2e' }] },
+    { featureType: 'poi',                  elementType: 'labels.text.fill', stylers: [{ color: '#3f3f46' }] },
+    { featureType: 'poi.park',             elementType: 'geometry',        stylers: [{ color: '#0f2016' }] },
+    { featureType: 'transit',              elementType: 'geometry',        stylers: [{ color: '#18181b' }] },
+    { featureType: 'transit.station',      elementType: 'labels.text.fill', stylers: [{ color: '#52525b' }] },
+];
+
+interface Atlas3DMapProps { className?: string }
+
+export default function Atlas3DMap({ className = '' }: Atlas3DMapProps) {
+    const searchParams = useSearchParams();
+    const focusNeighbor = searchParams.get('focus');
+
+    const mapRef = useRef<HTMLDivElement>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mapInstance = useRef<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const overlayRef = useRef<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const meshMapRef = useRef<Map<string, any>>(new Map());
+
+    const [activeFilter, setActiveFilter] = useState<Filter>('ALL');
+    const [selected, setSelected] = useState<PermitMarker | null>(null);
+    const [loaded, setLoaded] = useState(false);
+    const [apiError, setApiError] = useState(false);
+    const [threeError, setThreeError] = useState(false);
+
+    useEffect(() => {
+        if (!mapRef.current || mapInstance.current) return;
+
+        const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+        if (!apiKey) { setApiError(true); return; }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((window as any).google?.maps) {
+            initMap();
+            return;
+        }
+
+        const script = document.createElement('script');
+        // We need the 'geometry' library for coordinate math + 'marker' for AdvancedMarkerElement
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=visualization,geometry,marker&v=beta`;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => initMap();
+        script.onerror = () => setApiError(true);
+        document.head.appendChild(script);
+
+        async function initMap() {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const google = (window as any).google;
+            if (!google?.maps || !mapRef.current) return;
+
+            // Determine center — focus on searched neighborhood, or default to mid-NYC
+            let center = { lat: 40.7128, lng: -73.9562 };
+            if (focusNeighbor) {
+                const match = permitsGeo.find(p =>
+                    p.neighborhood.toLowerCase().includes(focusNeighbor.toLowerCase()) ||
+                    p.borough.toLowerCase().includes(focusNeighbor.toLowerCase())
+                );
+                if (match) center = { lat: match.lat, lng: match.lng };
+            }
+
+            const map = new google.maps.Map(mapRef.current, {
+                center,
+                zoom: 13,
+                tilt: 60,          // 3D perspective tilt
+                heading: 0,
+                styles: DARK_MAP_STYLE,
+                disableDefaultUI: true,
+                zoomControl: true,
+                zoomControlOptions: {
+                    position: google.maps.ControlPosition.RIGHT_BOTTOM,
+                },
+                gestureHandling: 'greedy',
+                backgroundColor: '#09090b',
+            });
+
+            mapInstance.current = map;
+
+            // ── Bootstrap Three.js overlay ────────────────────────────────────
+            try {
+                const THREE = await import('three');
+                const { ThreeJSOverlayView } = await import('@googlemaps/three');
+
+                const overlay = new ThreeJSOverlayView({
+                    map,
+                    anchor: { lat: center.lat, lng: center.lng, altitude: 0 },
+                    upAxis: 'Y',
+                    animationMode: 'ondemand',
+                });
+
+                overlayRef.current = overlay;
+
+                // Build permit cylinders
+                buildPermitMeshes(overlay, THREE, filterPermits(permitsGeo, 'ALL'));
+
+                // Raycasting — click to select permit
+                mapRef.current?.addEventListener('click', (e: MouseEvent) => {
+                    if (!mapRef.current) return;
+                    const rect = mapRef.current.getBoundingClientRect();
+                    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                    const hits = overlay.raycast({ x, y }, [...meshMapRef.current.values()], { recursive: false });
+                    if (hits.length > 0) {
+                        const hitId = hits[0].object.userData?.permitId as string | undefined;
+                        if (hitId) {
+                            const permit = permitsGeo.find(p => `${p.lat},${p.lng}` === hitId);
+                            setSelected(permit ?? null);
+                        }
+                    } else {
+                        setSelected(null);
+                    }
+                });
+
+                setLoaded(true);
+                overlay.requestRedraw();
+
+            } catch (err) {
+                console.error('[Atlas3DMap] Three.js overlay failed:', err);
+                setThreeError(true);
+                setLoaded(true);
+            }
+        }
+
+        function buildPermitMeshes(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            overlay: any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            THREE: any,
+            permits: PermitMarker[]
+        ) {
+            // Clear existing
+            meshMapRef.current.forEach(mesh => overlay.scene.remove(mesh));
+            meshMapRef.current.clear();
+
+            const geometry = new THREE.CylinderGeometry(2, 2, 40, 8);
+
+            permits.forEach(permit => {
+                const colorHex = JOB_COLOR[permit.jobType] ?? JOB_COLOR.default;
+                const material = new THREE.MeshStandardMaterial({
+                    color: colorHex,
+                    emissive: colorHex,
+                    emissiveIntensity: 0.6,
+                    transparent: true,
+                    opacity: 0.88,
+                    roughness: 0.3,
+                    metalness: 0.2,
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+
+                // Convert lat/lng → Three.js scene space
+                const position = overlay.latLngAltitudeToVector3({
+                    lat: permit.lat,
+                    lng: permit.lng,
+                    altitude: 20,   // hover 20m above ground
+                });
+                mesh.position.copy(position);
+                mesh.scale.set(1, 1, 1);
+                mesh.userData.permitId = `${permit.lat},${permit.lng}`;
+
+                overlay.scene.add(mesh);
+                meshMapRef.current.set(mesh.userData.permitId, mesh);
+            });
+
+            overlay.requestRedraw();
+        }
+
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    function handleFilter(f: Filter) {
+        setActiveFilter(f);
+        setSelected(null);
+
+        // Rebuild visible meshes
+        const overlay = overlayRef.current;
+        if (!overlay) return;
+
+        const filtered = filterPermits(permitsGeo, f);
+        const visibleIds = new Set(filtered.map(p => `${p.lat},${p.lng}`));
+
+        meshMapRef.current.forEach((mesh, id) => {
+            mesh.visible = visibleIds.has(id);
+        });
+        overlay.requestRedraw();
+    }
+
+    const counts = permitsGeo.reduce<Record<string, number>>((acc, p) => {
+        acc[p.jobType] = (acc[p.jobType] ?? 0) + 1;
+        return acc;
+    }, {});
+
+    if (apiError) {
+        return (
+            <div className={`flex flex-col ${className}`}>
+                <div className="mx-4 rounded-xl border border-dashed border-zinc-800 h-[460px] flex flex-col items-center justify-center gap-3 text-center px-6">
+                    <span className="text-3xl">🗺️</span>
+                    <p className="text-white font-semibold text-sm">Google Maps API key required</p>
+                    <p className="text-zinc-500 text-xs max-w-xs">
+                        Add <code className="text-emerald-400 bg-zinc-900 px-1.5 rounded font-mono text-[11px]">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to enable the 3D Atlas.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`flex flex-col ${className}`}>
+
+            {/* Filter pills */}
+            <div className="flex gap-2 px-4 py-2 overflow-x-auto scrollbar-none shrink-0">
+                {FILTERS.map(f => {
+                    const count = f.id === 'ALL'
+                        ? permitsGeo.length
+                        : f.id === 'A1'
+                            ? (counts['A1'] ?? 0) + (counts['A2'] ?? 0)
+                            : (counts[f.id] ?? 0);
+                    return (
+                        <button
+                            key={f.id}
+                            onClick={() => handleFilter(f.id)}
+                            aria-pressed={activeFilter === f.id}
+                            className={`shrink-0 px-3 py-2 rounded-lg text-xs font-mono font-semibold border transition-all min-h-[36px] flex items-center gap-1.5 ${activeFilter === f.id
+                                ? 'bg-zinc-800 border-zinc-600 text-white'
+                                : 'border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+                            }`}
+                        >
+                            <span>{f.label}</span>
+                            <span className="opacity-50 font-normal text-[10px]">{count}</span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* 3D map container */}
+            <div className="relative mx-4 rounded-xl overflow-hidden border border-zinc-800/80 h-[460px]">
+                <div ref={mapRef} className="w-full h-full" />
+
+                {/* Loading overlay */}
+                {!loaded && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/95">
+                        <div className="flex flex-col items-center gap-3 text-center">
+                            <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse motion-reduce:animate-none" />
+                            <p className="text-zinc-400 text-xs font-mono">Initializing 3D Atlas…</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3D mode badge */}
+                {loaded && !threeError && (
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-zinc-800 px-2 py-1 rounded-lg pointer-events-none">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">3D · WebGL</span>
+                    </div>
+                )}
+
+                {/* Three.js init error — still shows 2D map */}
+                {threeError && (
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-zinc-950/80 backdrop-blur-sm border border-rose-900/50 px-2 py-1 rounded-lg pointer-events-none">
+                        <span className="text-[10px] font-mono text-rose-400 uppercase tracking-wider">2D fallback</span>
+                    </div>
+                )}
+
+                {/* Tilt hint */}
+                {loaded && !threeError && (
+                    <div className="absolute bottom-3 right-3 pointer-events-none">
+                        <p className="text-[9px] font-mono text-zinc-600 text-right">Drag to pan · Pinch or scroll to zoom · Tilt: 60°</p>
+                    </div>
+                )}
+            </div>
+
+            {/* Selected permit panel */}
+            {selected && (
+                <div className="mx-4 mt-2.5 pl-3 pr-4 py-4 rounded-xl bg-zinc-900/90 border-l-2 border-l-zinc-500 border border-zinc-800 relative animate-fade-in"
+                    style={{ borderLeftColor: JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa' }}
+                >
+                    <button
+                        onClick={() => setSelected(null)}
+                        className="absolute top-3 right-3 text-zinc-500 hover:text-zinc-300 text-lg leading-none"
+                        aria-label="Close"
+                    >×</button>
+                    <div className="flex items-center gap-2 mb-2">
+                        <span
+                            className="text-[10px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded border"
+                            style={{ color: JOB_COLOR_HEX[selected.jobType], borderColor: (JOB_COLOR_HEX[selected.jobType] ?? '#a1a1aa') + '50' }}
+                        >
+                            {JOB_LABELS[selected.jobType] ?? selected.jobType}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-500">{selected.issueDate}</span>
+                    </div>
+                    <p className="text-white font-semibold text-sm">{selected.address}</p>
+                    <p className="text-zinc-400 text-xs mt-0.5">{selected.neighborhood} · {selected.borough} · {selected.zip}</p>
+                    <p className="text-zinc-600 text-xs mt-1.5 font-mono">
+                        Status: <span className="text-zinc-400">{selected.status}</span>
+                    </p>
+                </div>
+            )}
+
+            {/* Legend */}
+            <div className="px-4 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-zinc-500">
+                <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span className="text-emerald-500">▲ New Building</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    <span className="text-amber-500">◆ Alteration</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-400" />
+                    <span className="text-rose-500">▼ Demolition</span>
+                </span>
+                <span className="ml-auto text-zinc-700">{permitsGeo.length} permits · 3D markers</span>
+            </div>
+        </div>
+    );
+}

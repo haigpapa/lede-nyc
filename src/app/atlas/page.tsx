@@ -5,14 +5,14 @@ import AppHeader from '@/components/AppHeader';
 import dynamic from 'next/dynamic';
 import { permitsGeo } from '@/data/permits-geo';
 
-// Leaflet + all plugins require browser APIs — SSR disabled
-const AtlasMap = dynamic(() => import('@/components/AtlasMap'), {
+// Three.js + Google Maps WebGL require browser APIs — SSR disabled
+const Atlas3DMap = dynamic(() => import('@/components/Atlas3DMap'), {
     ssr: false,
     loading: () => (
         <div className="flex-1 mx-4 min-h-[400px] rounded-xl bg-zinc-900/50 border border-zinc-800 flex items-center justify-center">
             <div className="flex items-center gap-2 text-zinc-500 text-sm">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                Loading permit map…
+                Initializing 3D Atlas…
             </div>
         </div>
     ),
@@ -51,7 +51,7 @@ export default function AtlasPage() {
                         <span className="text-zinc-500 text-sm">Loading…</span>
                     </div>
                 }>
-                    <AtlasMap className="flex-1" />
+                    <Atlas3DMap className="flex-1" />
                 </Suspense>
             </main>
         </>
