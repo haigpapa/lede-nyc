@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     let mtaLines = 0;
     let githubSha: string | undefined;
     let issueUrl: string | undefined;
+    const runStartedAt = new Date().toISOString();
 
     console.log(`[pipeline] Starting run ${runId}`);
 
@@ -33,6 +34,15 @@ export async function GET(req: NextRequest) {
 
         // ── 2. civic-translator: Gemini Flash synthesis ──────────────────────
         console.log('[pipeline] Step 2: civic-translator (Gemini)');
+
+        // Job type → canonical color for post-processing guard
+        const jobTypeColorMap: Record<string, string> = {
+            NB: 'emerald', A1: 'emerald',
+            A2: 'amber', SG: 'amber', EW: 'amber', BL: 'amber', PL: 'amber',
+            DM: 'rose', FP: 'rose', EQ: 'rose',
+        };
+        const validColors = new Set(['emerald', 'amber', 'rose']);
+
         let cards;
         if (anomalies.length === 0) {
             // No anomalies today — generate a "quiet day" card
@@ -40,20 +50,46 @@ export async function GET(req: NextRequest) {
                 category: 'Update',
                 emoji: '✅',
                 accentColor: 'emerald',
-                headline: 'Construction activity normal today',
+                headline: 'Manhattan construction activity normal today',
                 bullets: [
-                    'No significant spikes detected in Hell\'s Kitchen permit activity this week.',
+                    'No significant spikes detected in Manhattan permit activity this week.',
                     'Seven-day permit counts are in line with the 90-day average for all job types.',
                     'Check back tomorrow — the pipeline runs daily at 6am.',
                 ],
-                timestamp: new Date().toISOString(),
-                mapFocus: 'hells-kitchen',
+                timestamp: runStartedAt,
+                mapFocus: 'midtown',
                 sqlQuery: sql,
+                dataWindow: 'past 7 days',
+                provenanceRowCount: 0,
+                provenanceSampleId: 'No anomalies detected',
+                provenanceIngestedAt: runStartedAt,
             }];
         } else {
             cards = await translateAnomalies(anomalies);
             // Inject SQL provenance into the first card
             if (cards[0]) cards[0].sqlQuery = sql;
+
+            // Post-processing: enforce color triad + inject provenance per card
+            cards = cards.map((card, i) => {
+                const anomaly = anomalies[i] ?? anomalies[0];
+                // Override color if Gemini chose wrong color for job type
+                let accentColor = card.accentColor;
+                if (!validColors.has(accentColor)) accentColor = 'amber';
+                const expectedColor = anomaly ? jobTypeColorMap[anomaly.jobType] : undefined;
+                if (expectedColor && !validColors.has(card.accentColor)) {
+                    accentColor = expectedColor;
+                }
+                return {
+                    ...card,
+                    accentColor,
+                    dataWindow: 'past 7 days',
+                    provenanceRowCount: anomalies.length,
+                    provenanceSampleId: anomaly
+                        ? `ZIP ${anomaly.zip} · ${anomaly.jobType} · ${anomaly.pctChange > 0 ? '+' : ''}${anomaly.pctChange}%`
+                        : undefined,
+                    provenanceIngestedAt: runStartedAt,
+                };
+            });
         }
         feedCards = cards.length;
         console.log(`[pipeline] Generated ${feedCards} LedeCards`);
@@ -64,9 +100,21 @@ export async function GET(req: NextRequest) {
             ? `https://${process.env.VERCEL_URL}`
             : 'http://localhost:3000';
 
+        // Wrap cards in FeedPayload envelope with pipeline metadata
+        const feedPayload = {
+            meta: {
+                runId,
+                generatedAt: runStartedAt,
+                dataWindow: 'past 7 days',
+                source: 'NYC DOB Permits via BigQuery',
+                borough: 'Manhattan',
+            },
+            cards,
+        };
+
         const [commitSha, mtaResult] = await Promise.allSettled([
             // Commit feed.json to GitHub (triggers Vercel redeploy)
-            commitFeedJson(JSON.stringify(cards, null, 2)),
+            commitFeedJson(JSON.stringify(feedPayload, null, 2)),
             // Snapshot MTA reliability to BigQuery
             fetch(`${origin}/api/store-mta-snapshot`, {
                 method: 'POST',

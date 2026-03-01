@@ -79,6 +79,8 @@ export async function runPermitAuditor(): Promise<{ rows: AnomalyRow[]; sql: str
       FROM \`lede-nyc-data.civicdata.dob-permits\`
       WHERE string_field_7 IS NOT NULL
         AND string_field_6 IN ('NB', 'A1', 'A2', 'DM', 'SG', 'EW', 'PL', 'FP', 'EQ', 'BL')
+        AND string_field_0 = 'MANHATTAN'
+        AND SAFE_CAST(string_field_7 AS INT64) BETWEEN 10001 AND 10282
     ),
     recent_7d AS (
       SELECT zip, job_type, COUNT(*) AS cnt_7d,

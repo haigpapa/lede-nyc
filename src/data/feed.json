@@ -1,58 +1,25 @@
-[
-    {
-        "category": "Housing",
-        "emoji": "🏗️",
-        "accentColor": "emerald",
-        "headline": "Brooklyn Is the City's #1 New Construction Hotspot",
-        "bullets": [
-            "Brooklyn has 133 new building permits in this dataset — the most of any borough. That's more than Queens (72) and Manhattan (20) combined.",
-            "Three Brooklyn neighborhoods are tied for most new buildings: North Side–South Side, Stuyvesant Heights, and East New York — each with 10 issued permits.",
-            "Bedford, Bushwick North, and Greenpoint are also seeing serious construction. If you rent near these areas, expect more cranes soon."
-        ],
-        "timestamp": "2025-12-30T12:00:00Z",
-        "mapFocus": "brooklyn",
-        "sqlQuery": "SELECT string_field_59, string_field_0, COUNT(*) FROM `lede-nyc-data.civicdata.dob-permits` WHERE string_field_6='NB' AND string_field_59 IS NOT NULL GROUP BY 1,2 ORDER BY 3 DESC LIMIT 20"
+{
+    "meta": {
+        "runId": "seed",
+        "generatedAt": "2026-03-01T11:00:00Z",
+        "dataWindow": "past 7 days",
+        "source": "NYC DOB Permits via BigQuery",
+        "borough": "Manhattan"
     },
-    {
-        "category": "Renovations",
-        "emoji": "🔨",
-        "accentColor": "amber",
-        "headline": "Upper West Side Leads Manhattan in Renovation Permits",
-        "bullets": [
-            "A2 renovation permits dominate the Manhattan sample — 139 total, with the Upper West Side leading at 17 and Midtown-Midtown South close behind at 14.",
-            "West Village and Hudson Yards-Chelsea-Flatiron each have 11 renovation permits, pointing to high renovation activity in high-income neighborhoods.",
-            "An A2 permit means interior work — gut renovations, structural changes — that can temporarily displace tenants. Worth watching if you live in these areas."
-        ],
-        "timestamp": "2025-12-30T12:00:00Z",
-        "mapFocus": "manhattan",
-        "sqlQuery": "SELECT string_field_59, string_field_6, COUNT(*) FROM `lede-nyc-data.civicdata.dob-permits` WHERE string_field_6='A2' AND string_field_0='MANHATTAN' GROUP BY 1,2 ORDER BY 3 DESC LIMIT 10"
-    },
-    {
-        "category": "Housing",
-        "emoji": "🏡",
-        "accentColor": "sky",
-        "headline": "Queens: New Homes Going Up Fast in Flushing and South Ozone Park",
-        "bullets": [
-            "Flushing leads Queens with 8 new building permits, followed by Jamaica Estates-Holliswood and South Ozone Park with 7 each.",
-            "Queens has 72 new building permits total — the second highest of any borough after Brooklyn.",
-            "College Point and Borough Park are also active, each with 6 new building permits. These are growing neighborhoods to watch."
-        ],
-        "timestamp": "2025-12-19T12:00:00Z",
-        "mapFocus": "queens",
-        "sqlQuery": "SELECT string_field_59, COUNT(*) FROM `lede-nyc-data.civicdata.dob-permits` WHERE string_field_6='NB' AND string_field_0='QUEENS' GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
-    },
-    {
-        "category": "Demolitions",
-        "emoji": "⚠️",
-        "accentColor": "rose",
-        "headline": "7 Buildings Being Torn Down — Mostly in Brooklyn and the Bronx",
-        "bullets": [
-            "The dataset contains 7 demolition (DM) permits — 4 in Brooklyn and 3 in the Bronx. No demolitions in Manhattan or Queens in this sample.",
-            "Demolitions often precede new development. If you live in a Bronx or Brooklyn neighborhood seeing new construction, watch for DM permits nearby.",
-            "NYC DOB must approve all demolitions. You can look up any address at nyc.gov/buildings for full permit history."
-        ],
-        "timestamp": "2025-12-02T12:00:00Z",
-        "mapFocus": "bronx",
-        "sqlQuery": "SELECT string_field_0, COUNT(*) FROM `lede-nyc-data.civicdata.dob-permits` WHERE string_field_6='DM' GROUP BY 1 ORDER BY 2 DESC"
-    }
-]
+    "cards": [
+        {
+            "category": "Construction",
+            "emoji": "🏗️",
+            "accentColor": "emerald",
+            "headline": "Pipeline Initializing — First Brief at 6am",
+            "bullets": [
+                "The autonomous pipeline runs daily at 6am ET, querying NYC DOB permit data from BigQuery.",
+                "Manhattan construction anomalies — spikes more than 25% above the 90-day average — will appear here.",
+                "All data is sourced directly from NYC Open Data with zero editorial bias. Check back tomorrow."
+            ],
+            "timestamp": "2026-03-01T11:00:00Z",
+            "mapFocus": "manhattan",
+            "sqlQuery": ""
+        }
+    ]
+}

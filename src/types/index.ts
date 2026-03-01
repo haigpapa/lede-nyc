@@ -1,4 +1,6 @@
-export type AccentColor = 'emerald' | 'amber' | 'sky' | 'violet' | 'rose';
+// Canonical card color triad — matches deck: Emerald=Growth, Amber=Friction, Rose=Disruption
+// sky and violet are retained in accentMap for non-card UI use only
+export type AccentColor = 'emerald' | 'amber' | 'rose' | 'sky' | 'violet';
 
 export interface AccentTheme {
     bg: string;
@@ -69,4 +71,23 @@ export interface LedeCardData {
     trend?: number[];
     trendColor?: string;  // hex color for sparkline, defaults to accent
     mapFocus?: string;  // borough or neighborhood name → deeplinks to /atlas?focus=X
+    // Provenance fields (injected by pipeline)
+    dataWindow?: string;         // e.g. "past 7 days"
+    provenanceRowCount?: number; // how many anomaly rows matched
+    provenanceSampleId?: string; // e.g. "ZIP 10036 · job_type NB"
+    provenanceIngestedAt?: string; // ISO timestamp of pipeline run
+}
+
+// Feed envelope — wraps cards with pipeline run metadata
+export interface FeedMeta {
+    runId: string;
+    generatedAt: string;    // ISO timestamp of pipeline run
+    dataWindow: string;     // e.g. "past 7 days"
+    source: string;         // e.g. "NYC DOB Permits via BigQuery"
+    borough: string;        // e.g. "Manhattan"
+}
+
+export interface FeedPayload {
+    meta: FeedMeta;
+    cards: LedeCardData[];
 }

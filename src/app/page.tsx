@@ -6,22 +6,25 @@ import TransitCard from '@/components/TransitCard';
 import LedeCard from '@/components/LedeCard';
 import ProTeaser from '@/components/ProTeaser';
 import UserBar from '@/components/UserBar';
-import type { LedeCardData } from '@/types';
+import type { LedeCardData, FeedPayload } from '@/types';
 import feedJson from '@/data/feed.json';
 import { nbTrend, altTrend } from '@/data/trend-data';
 
-const feed = feedJson as LedeCardData[];
+const { meta, cards: feedCards } = feedJson as unknown as FeedPayload;
 
 // Inject real BigQuery trend data into the first two cards
-const feedWithTrends: LedeCardData[] = feed.map((card, i) => ({
+// Also forward dataWindow from meta into every card
+const feedWithTrends: LedeCardData[] = feedCards.map((card, i) => ({
   ...card,
+  dataWindow: card.dataWindow ?? meta.dataWindow,
   trend: i === 0 ? nbTrend.values : i === 1 ? altTrend.values : undefined,
   trendColor: i === 0 ? '#10b981' : i === 1 ? '#f59e0b' : undefined,
 }));
 
+// Derive daily brief from first card's bullets — no more hardcoded content
 const dailyBrief = {
-  summary: "Brooklyn is the city's construction engine right now — North Side, Stuyvesant Heights, and East New York each have 10 new building permits, and the outer boroughs are far outpacing Manhattan for new development. Meanwhile, renovation permits are concentrated in the Upper West Side and Chelsea. Seven demolitions are quietly underway in Brooklyn and the Bronx — often the first sign of what's coming next.",
-  timestamp: '2025-12-30T12:00:00Z',
+  summary: feedCards[0]?.bullets.join(' ') ?? 'Pipeline running — Manhattan construction briefing coming at 6am.',
+  timestamp: meta.generatedAt,
 };
 
 export default function BriefPage() {
@@ -44,7 +47,7 @@ export default function BriefPage() {
 
           {/* Feed cards */}
           <div className="pt-1">
-            <p className="text-[10px] font-bold tracking-[0.12em] text-zinc-500 uppercase mb-3 px-0.5">Block Signals</p>
+            <p className="text-xs font-bold tracking-[0.12em] text-zinc-500 uppercase mb-3 px-0.5">Block Signals</p>
             <div className="space-y-4">
               {feedWithTrends.map((card, index) => (
                 <div key={index}>
