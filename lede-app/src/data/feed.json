@@ -1,7 +1,7 @@
 {
   "meta": {
-    "runId": "run_20260311_hvg2",
-    "generatedAt": "2026-03-11T11:19:12.080Z",
+    "runId": "run_20260312_zz39",
+    "generatedAt": "2026-03-12T11:44:33.798Z",
     "dataWindow": "past 7 days",
     "source": "NYC DOB Permits via BigQuery",
     "borough": "All Boroughs"
@@ -17,13 +17,13 @@
         "Seven-day permit counts are in line with the 90-day average for all job types.",
         "Check back tomorrow — the pipeline runs daily at 6am."
       ],
-      "timestamp": "2026-03-11T11:19:12.080Z",
+      "timestamp": "2026-03-12T11:44:33.798Z",
       "mapFocus": "midtown",
       "sqlQuery": "\n    WITH all_permits AS (\n      SELECT\n        COALESCE(string_field_0, 'UNKNOWN') AS borough,\n        COALESCE(string_field_7, 'UNKNOWN') AS zip,\n        COALESCE(string_field_6, 'UNKNOWN') AS job_type,\n        COALESCE(string_field_9 || ' ' || string_field_11, 'Unknown Address') AS address,\n        SAFE.PARSE_DATE('%m/%d/%Y', string_field_18) AS issued_date\n      FROM `lede-nyc-data.civicdata.dob-permits`\n      WHERE string_field_7 IS NOT NULL\n        AND string_field_6 IN ('NB', 'A1', 'A2', 'DM', 'SG', 'EW', 'PL', 'FP', 'EQ', 'BL')\n        AND string_field_0 IN ('MANHATTAN', 'BROOKLYN', 'QUEENS', 'BRONX', 'STATEN ISLAND')\n    ),\n    recent_7d AS (\n      SELECT borough, zip, job_type, COUNT(*) AS cnt_7d,\n             ANY_VALUE(address) AS top_address\n      FROM all_permits\n      WHERE issued_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)\n      GROUP BY borough, zip, job_type\n    ),\n    avg_90d AS (\n      SELECT borough, zip, job_type,\n             COUNT(*) / (90.0 / 7.0) AS avg_per_7d\n      FROM all_permits\n      WHERE issued_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 97 DAY)\n        AND issued_date < DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)\n      GROUP BY borough, zip, job_type\n      HAVING avg_per_7d > 0\n    )\n    SELECT\n      r.borough,\n      r.zip,\n      r.job_type,\n      r.cnt_7d            AS recent_7d,\n      ROUND(a.avg_per_7d, 1) AS avg_90d,\n      ROUND((r.cnt_7d - a.avg_per_7d) / a.avg_per_7d * 100, 1) AS pct_change,\n      r.top_address\n    FROM recent_7d r\n    JOIN avg_90d a USING (borough, zip, job_type)\n    WHERE ABS((r.cnt_7d - a.avg_per_7d) / a.avg_per_7d) > 0.25\n    ORDER BY ABS(pct_change) DESC\n    LIMIT 30\n  ",
       "dataWindow": "past 7 days",
       "provenanceRowCount": 0,
       "provenanceSampleId": "No anomalies detected",
-      "provenanceIngestedAt": "2026-03-11T11:19:12.080Z"
+      "provenanceIngestedAt": "2026-03-12T11:44:33.798Z"
     }
   ]
 }
